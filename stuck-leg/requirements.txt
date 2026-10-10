@@ -1,6 +1,0 @@
-numpy
-pandas
-scikit-learn
-joblib
-pyserial      # only for --source serial
-m2cgen        # only for --export-c
