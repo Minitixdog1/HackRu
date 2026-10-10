@@ -18,6 +18,8 @@ class LiveRunner:
     def __init__(self, link, bundle=None, rate=50, cost_false=10, cost_stuck=1, n_consec=3,
                  watch_only=False, log_dir=None, on_event=None):
         self.link = link
+        if link.info.get("isaac"):               # Isaac Lab sim dog: no motor current/encoders to judge
+            bundle = None
         self.bundle = bundle                     # None = no model: telemetry + commands only
         self.rate = rate
         self.thr = release_threshold(cost_false, cost_stuck)

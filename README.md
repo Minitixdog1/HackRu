@@ -14,6 +14,7 @@ you: "walk forward for 3 seconds"
 | --- | --- |
 | [`esp32-firmware/`](esp32-firmware/) | PlatformIO project for the ESP32: Wi-Fi, telemetry, gait, unstick/detach, and a fake-sensor mode for testing with a bare board. Wiring and pins are in its README. |
 | [`stuck-leg/`](stuck-leg/) | Laptop code: Wi-Fi link, stuck-leg ML (logging, training, live detection), and the Qwen commander. |
+| [`isaaclab-sim/`](isaaclab-sim/) | A simulated dog in Isaac Lab that speaks the ESP32's protocol, so Qwen and `commander.py` can drive it with no hardware. Setup for Windows + RTX laptops in its README. |
 
 ## Quick start
 
@@ -36,5 +37,7 @@ you: "walk forward for 3 seconds"
    python live.py                                     # keyboard control + live stuck-leg display
    python commander.py --llm-url http://FRIEND_IP:11434   # talk to it through Qwen
    ```
+
+No robot yet? Drive the simulated dog instead: see [`isaaclab-sim/README.md`](isaaclab-sim/README.md).
 
 Details: [`esp32-firmware/README.md`](esp32-firmware/README.md) and [`stuck-leg/README.md`](stuck-leg/README.md).

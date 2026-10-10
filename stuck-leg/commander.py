@@ -280,7 +280,8 @@ def main():
         link = RobotLink(args.robot_ip)
         print("looking for the robot...")
         info = link.connect()
-        print(f"connected to {link.robot[0]} ({'SIMULATED sensors' if info.get('sim') else 'real sensors'})")
+        kind = "Isaac Lab simulated dog" if info.get("isaac") else ("SIMULATED sensors" if info.get("sim") else "real sensors")
+        print(f"connected to {link.robot[0]} ({kind})")
         runner = LiveRunner(link, bundle, watch_only=args.watch_only,
                             on_event=lambda text: print(f"\n   !! {text}"))
         runner.start()
