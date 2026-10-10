@@ -92,7 +92,7 @@ All messages are JSON over UDP port 4210.
 | --- | --- | --- |
 | PC → robot | `{"cmd":"hello"}` | Discovery; the robot replies `{"hello":"robotdog","sim":1,"ap":0}` |
 | PC → robot | `{"cmd":"hb"}` | Heartbeat every 100 ms; silence for 300 ms stops the motors |
-| PC → robot | `{"cmd":"gait","on":1,"freq":1.5,"amp":25}` | Start/stop walking; `freq` and `amp` optional |
+| PC → robot | `{"cmd":"gait","on":1,"freq":1.5,"amp":25,"turn":0}` | Start/stop walking; `freq`, `amp`, `turn` optional (`turn` -1 = left … 1 = right) |
 | PC → robot | `{"cmd":"stop"}` | Motors off |
 | PC → robot | `{"cmd":"unstick","leg":"FR"}` | Wiggle that leg for 1.5 s, then resume walking |
 | PC → robot | `{"cmd":"detach","leg":"FR"}` | Motor off and latch servo releases |

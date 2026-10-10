@@ -4,7 +4,8 @@
 // Protocol (JSON over UDP, port UDP_PORT):
 //   PC -> robot   {"cmd":"hello"}                 discovery (broadcast); robot replies {"hello":"robotdog",...}
 //                 {"cmd":"hb"}                    heartbeat, every 100 ms; silence > 300 ms = motors off
-//                 {"cmd":"gait","on":1,"freq":1.5,"amp":25}   start/stop walking (freq, amp optional)
+//                 {"cmd":"gait","on":1,"freq":1.5,"amp":25,"turn":0}   start/stop walking; freq, amp, turn optional
+//                                                 turn -1..1: negative = turn left, positive = turn right
 //                 {"cmd":"stop"}                  motors off
 //                 {"cmd":"unstick","leg":"FL"}    wiggle that leg for UNSTICK_MS, then resume walking
 //                 {"cmd":"resume"}                end an unstick early
@@ -52,6 +53,7 @@ struct State {
   bool gaitOn = false;
   float gaitFreq = GAIT_FREQ_HZ;
   float gaitAmp = GAIT_AMP_DEG;
+  float gaitTurn = 0.0f;            // -1..1; scales left vs right stride
   float phase = 0.0f;
   bool attached[4] = {true, true, true, true};
   int unstickLeg = -1;              // -1 = not unsticking
@@ -390,9 +392,10 @@ static void simStep(float dt) {
   sim.tilt[0] += (tRoll - sim.tilt[0]) * fminf(1.0f, 4 * dt);
   sim.tilt[1] += (tPitch - sim.tilt[1]) * fminf(1.0f, 4 * dt);
   float roll = sim.tilt[0] + sim.terrain[0], pitch = sim.tilt[1] + sim.terrain[1];
-  float ph;
+  float ph, turnCmd;
   portENTER_CRITICAL(&mux);
   ph = S.phase;
+  turnCmd = S.gaitTurn;
   portEXIT_CRITICAL(&mux);
 
   float bounce = on ? 0.6f * sinf(2 * TWO_PI_F * ph) : 0.0f;
@@ -402,7 +405,7 @@ static void simStep(float dt) {
   imu[2] = G * cosf(roll) * cosf(pitch) + bounce + gauss(n);
   imu[3] = gauss(3 * rough) + 40 * (tRoll - sim.tilt[0]);
   imu[4] = gauss(3 * rough) + 40 * (tPitch - sim.tilt[1]);
-  imu[5] = yaw + (on ? sim.turn : 0) + gauss(4 * rough);
+  imu[5] = yaw + (on ? sim.turn - 30 * turnCmd : 0) + gauss(4 * rough);   // turning right = negative yaw rate
 
   for (int i = 0; i < 4; i++) {
     float h = 80.0f + 150 * (CORNER_X[i] * sinf(pitch) - CORNER_Y[i] * sinf(roll));
@@ -430,7 +433,10 @@ static void computeTargets(float dt, uint32_t now) {   // caller holds mux
         S.target[i] = S.unstickCenter + UNSTICK_AMP_DEG * sinf(TWO_PI_F * UNSTICK_FREQ_HZ * t);
       }                                            // other legs hold still while it wiggles
     } else {
-      S.target[i] = S.gaitAmp * sinf(TWO_PI_F * (S.phase + PHASE_OFFSET[i]));
+      // Turning: longer strides on one side. Left legs (FL, RL) grow when turning right.
+      float side = (i == 0 || i == 2) ? 1.0f : -1.0f;
+      float amp = S.gaitAmp * (1.0f + 0.5f * S.gaitTurn * side);
+      S.target[i] = amp * sinf(TWO_PI_F * (S.phase + PHASE_OFFSET[i]));
     }
   }
 }
@@ -519,10 +525,11 @@ static void handlePacket(const char* data, int len, IPAddress ip, uint16_t port)
     portENTER_CRITICAL(&mux);
     S.gaitFreq = doc["freq"] | S.gaitFreq;
     S.gaitAmp = doc["amp"] | S.gaitAmp;
+    S.gaitTurn = fmaxf(-1.0f, fminf(1.0f, doc["turn"] | 0.0f));
     S.gaitOn = on != 0;
     if (!S.gaitOn) S.unstickLeg = -1;
     portEXIT_CRITICAL(&mux);
-    Serial.printf("Gait %s (%.2f Hz, %.0f deg)\n", on ? "on" : "off", S.gaitFreq, S.gaitAmp);
+    Serial.printf("Gait %s (%.2f Hz, %.0f deg, turn %.2f)\n", on ? "on" : "off", S.gaitFreq, S.gaitAmp, S.gaitTurn);
   } else if (strcmp(cmd, "stop") == 0) {
     stopMotors("stop command");
   } else if (strcmp(cmd, "unstick") == 0 && leg >= 0) {
