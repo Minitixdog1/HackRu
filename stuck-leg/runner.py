@@ -18,8 +18,6 @@ class LiveRunner:
     def __init__(self, link, bundle=None, rate=50, cost_false=10, cost_stuck=1, n_consec=3,
                  watch_only=False, log_dir=None, on_event=None):
         self.link = link
-        if link.info.get("isaac"):               # Isaac Lab sim dog: no motor current/encoders to judge
-            bundle = None
         self.bundle = bundle                     # None = no model: telemetry + commands only
         self.rate = rate
         self.thr = release_threshold(cost_false, cost_stuck)
@@ -33,6 +31,7 @@ class LiveRunner:
         self.det = OnlineDetector(bundle, rate) if bundle else None
         self.ctl = ReleaseController(threshold=self.thr, n_consec=n_consec)
         self.walking = False
+        self.gait_cmd = {"on": False, "freq": 1.5, "turn": 0.0}   # last walk command sent
         self.p_last = None
         self.msg_last = None
         self._n, self._t0, self.hz = 0, time.monotonic(), 0.0
@@ -50,6 +49,13 @@ class LiveRunner:
 
     # ------------------------------------------------------------ commands
     def send(self, cmd):
+        c = cmd.get("cmd")
+        with self.lock:
+            if c == "gait":
+                self.gait_cmd = {"on": bool(cmd.get("on", 1)), "freq": float(cmd.get("freq", self.gait_cmd["freq"])),
+                                 "turn": float(cmd.get("turn", 0) or 0)}
+            elif c == "stop":
+                self.gait_cmd["on"] = False
         self.link.send(cmd)
 
     def event(self, text):
@@ -134,6 +140,8 @@ class LiveRunner:
             att = msg.get("att", [1, 1, 1, 1])
             p = self.p_last
             stuck = [LEGS[i] for i in range(4) if att[i] and p is not None and p[i + 1] >= 0.5]
+            acting = (LEGS[self.ctl.leg] if self.ctl.state in ("UNSTICK", "RECHECK", "HOLD")
+                      and self.ctl.leg is not None else None)
             return {
                 "connected": msg != {},
                 "walking": self.walking,
@@ -143,6 +151,12 @@ class LiveRunner:
                                       if p is not None else None),
                 "looks_stuck": stuck,
                 "release_logic_state": self.ctl.state,
+                "acting_on_leg": acting,
+                "threshold": round(self.thr, 2),
+                "model_loaded": self.bundle is not None,
+                "gait_command": dict(self.gait_cmd),
+                "leg_angles": msg.get("enc", [0, 0, 0, 0]),
+                "simulated": self.sim,
                 "sim_jammed_leg": (LEGS[msg["jam"]] if self.sim and msg.get("jam", -1) >= 0 else None),
                 "messages_per_second": round(self.hz),
                 "recent_events": [f"{t} {e}" for t, e in list(self.events)[-5:]],

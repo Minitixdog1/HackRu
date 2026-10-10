@@ -170,11 +170,12 @@ def _args(a):
 class RobotActions:
     """What each tool does. With runner=None (--no-robot) actions are only printed."""
 
-    def __init__(self, runner=None):
+    def __init__(self, runner=None, log=print):
         self.runner = runner
+        self.log = log
 
     def _send(self, cmd):
-        print(f"   -> robot: {json.dumps(cmd)}")
+        self.log(f"   -> robot: {json.dumps(cmd)}")
         if self.runner:
             self.runner.send(cmd)
 
@@ -215,8 +216,8 @@ class RobotActions:
 
 # ====================================================================== conversation
 class Commander:
-    def __init__(self, llm, actions, max_history=12):
-        self.llm, self.actions, self.max_history = llm, actions, max_history
+    def __init__(self, llm, actions, max_history=12, log=print):
+        self.llm, self.actions, self.max_history, self.log = llm, actions, max_history, log
         self.history = []
 
     def ask(self, text):
@@ -236,7 +237,7 @@ class Commander:
             if not calls:
                 break
             for call_id, name, args in calls:
-                print(f"   [{name}({json.dumps(args)})]")
+                self.log(f"   [{name}({json.dumps(args)})]")
                 turn_msgs.append(self.llm.tool_result(call_id, name, self.actions.run(name, args)))
         self.history += turn_msgs
         return reply or "(done)"
@@ -280,7 +281,7 @@ def main():
         link = RobotLink(args.robot_ip)
         print("looking for the robot...")
         info = link.connect()
-        kind = "Isaac Lab simulated dog" if info.get("isaac") else ("SIMULATED sensors" if info.get("sim") else "real sensors")
+        kind = "SIMULATED sensors" if info.get("sim") else "real sensors"
         print(f"connected to {link.robot[0]} ({kind})")
         runner = LiveRunner(link, bundle, watch_only=args.watch_only,
                             on_event=lambda text: print(f"\n   !! {text}"))

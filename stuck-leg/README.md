@@ -1,6 +1,6 @@
 # Robot Dog: Laptop Code
 
-Everything that runs on the laptop: the Wi-Fi link to the ESP32, stuck-leg detection (ML), and the Qwen commander that turns plain-English commands into robot actions.
+Everything that runs on the laptop: the Wi-Fi link to the ESP32, stuck-leg detection (ML), the Qwen commander that turns plain-English commands into robot actions, and a live 2D dashboard.
 
 | File | What it does |
 | --- | --- |
@@ -16,6 +16,8 @@ Everything that runs on the laptop: the Wi-Fi link to the ESP32, stuck-leg detec
 | `runner.py` | The live loop: heartbeat, telemetry, stuck-leg model, automatic unstick/detach |
 | `live.py` | Runs the live loop with a keyboard UI and a live stuck-probability display |
 | `commander.py` | Plain-English control through a local Qwen model (Ollama or any OpenAI-compatible server) |
+| `dashboard.py` | Live 2D window: the dog from above, leg states, event log, Qwen chat box, and buttons |
+| `fake_esp32.py` | A pretend ESP32 on the laptop (same protocol) for testing with no hardware |
 
 ## Quick start
 
@@ -42,6 +44,22 @@ python logger.py --source udp   # collect real labeled data (g = walk, 1-4 = stu
 ```
 
 Add `--robot-ip 192.168.4.1` (or the IP on the serial monitor) if discovery doesn't find it.
+
+## The dashboard
+
+```bash
+python dashboard.py --demo                     # no hardware: runs a pretend ESP32 on this laptop
+python dashboard.py                            # the real ESP32 on the same Wi-Fi
+python dashboard.py --llm-url http://FRIEND_IP:11434   # Qwen on another computer
+python dashboard.py --no-llm                   # buttons only
+```
+
+- **Left:** the dog seen from above, with its path. Position is estimated from the commands, since the robot has no position sensor.
+- **Leg colors:** green = fine, yellow = maybe stuck, red = stuck, orange = being freed, gray = detached. The legs swing using the real encoder angles, so a stuck leg visibly freezes.
+- **Right:** each leg's stuck probability against the release threshold (dotted line), a log of everything that happened, Walk/Turn/Stop/Reattach buttons, and a box for typing commands to Qwen.
+- **Jam a leg:** these buttons appear when the robot has simulated sensors (the ESP32's fake-sensor mode, or `--demo`). Use them to show the stuck-leg model working.
+
+Only one program can talk to the robot at a time, so run the dashboard *instead of* `live.py` or `commander.py`, not alongside them.
 
 ## Talk to it with Qwen
 
