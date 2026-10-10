@@ -14,6 +14,7 @@ you: "walk forward for 3 seconds"
 | --- | --- |
 | [`esp32-firmware/`](esp32-firmware/) | PlatformIO project for the ESP32: Wi-Fi, telemetry, gait, unstick/detach, and a fake-sensor mode for testing with a bare board. Wiring and pins are in its README. |
 | [`stuck-leg/`](stuck-leg/) | Laptop code: Wi-Fi link, stuck-leg ML (logging, training, live detection), the Qwen commander, and the 2D dashboard. |
+| [`Onshapefile/`](Onshapefile/) | CAD: STEP exports of the hub, top platform, leg arms, leg spokes and full assembly, with previews and a part-by-part explanation. |
 
 ## Quick start
 
