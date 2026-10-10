@@ -12,6 +12,8 @@ Detects when a leg of the robot dog is stuck (and which one) from IMU, ToF, moto
 | `baseline.py` | Rule-based detector (tracking error + motor current) |
 | `train.py` | Random forest, split by trial, compared against the baseline |
 | `decide.py` | Live detector + release state machine (unstick, resume, detach) |
+| `robot_link.py` | Wi-Fi link to the ESP32: discovery, heartbeat, telemetry, commands |
+| `live.py` | Runs the model live on the robot over Wi-Fi and sends unstick/detach |
 
 ## Quick start
 
@@ -26,7 +28,18 @@ python train.py data/
 python decide.py models/stuck_rf.joblib data/fake_011.csv
 ```
 
-Real robot: `python logger.py --source serial --port COM5` or `python logger.py --source udp --port 4210`.
+## Live on the ESP32 over Wi-Fi
+
+Flash `../esp32-firmware` first (see its README; it can fake the sensors so a bare ESP32 works). Then:
+
+```bash
+python robot_link.py        # finds the robot, prints messages/second
+python live.py              # walks, runs the model, unsticks or detaches legs on its own
+python live.py --watch-only # predictions only, never sends unstick/detach
+python logger.py --source udp   # collect real labeled data (g = walk, 1-4 = stuck leg, 0 = free)
+```
+
+Add `--robot-ip 192.168.4.1` (or the IP on the serial monitor) if discovery doesn't find it.
 
 ## Telemetry message (ESP32 → PC, ~50 Hz)
 
@@ -34,4 +47,4 @@ Real robot: `python logger.py --source serial --port COM5` or `python logger.py 
 {"t": 10342, "imu": [ax, ay, az, gx, gy, gz], "tof": [FL, FR, RL, RR], "cur": [FL, FR, RL, RR], "enc": [FL, FR, RL, RR], "cmd": [FL, FR, RL, RR], "ph": 0.37}
 ```
 
-The PC sends `{"cmd":"hb"}` every 100 ms; the ESP32 should stop all motors after ~300 ms without one.
+The firmware also adds `gait`, `att`, `sim`, and `jam`. The PC sends `{"cmd":"hb"}` every 100 ms; the ESP32 stops all motors after 300 ms without one. The full command list is in `../esp32-firmware/README.md`.

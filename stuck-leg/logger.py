@@ -3,6 +3,7 @@
 Keys while logging:
   1-4  leg FL / FR / RL / RR is stuck now
   0    nothing is stuck
+  g    start / stop walking (Wi-Fi robot)
   q    stop and save
 
 Each run = one trial = one CSV file in data/. Keep trials short (1-3 min) and
@@ -11,7 +12,8 @@ vary them: speed, surface, battery, how the leg gets stuck.
 Sources:
   --source fake     built-in fake robot (pressing 1-4 really "jams" that leg)
   --source serial   ESP32 over USB, newline-delimited JSON (--port COM5 or /dev/ttyUSB0)
-  --source udp      ESP32 over Wi-Fi, one JSON message per UDP packet (--port 4210)
+  --source udp      ESP32 over Wi-Fi (finds it automatically, or --robot-ip 192.168.4.1)
+                    If the ESP32 runs with SIM_SENSORS 1, pressing 1-4 jams that leg on it.
 
 Generate a fake dataset with no keyboard at all:
   python logger.py --source fake --auto --trials 40 --duration 60 --fast
@@ -21,7 +23,6 @@ import csv
 import json
 import os
 import random
-import socket
 import sys
 import time
 
@@ -100,26 +101,34 @@ class SerialSource:
 
 
 class UdpSource:
-    def __init__(self, port):
-        self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        self.sock.bind(("0.0.0.0", port))
-        self.sock.settimeout(0.5)
-        self.robot_addr = None                  # learned from the first packet
+    """ESP32 over Wi-Fi, via robot_link.RobotLink (discovery + heartbeat)."""
+
+    def __init__(self, robot_ip=None, walk=True):
+        from robot_link import RobotLink
+        self.link = RobotLink(robot_ip)
+        print("looking for the robot...")
+        info = self.link.connect()
+        self.sim = bool(info.get("sim"))
+        print(f"connected to {self.link.robot[0]} ({'SIMULATED sensors' if self.sim else 'real sensors'})")
+        self.walking = walk
+        self.link.send({"cmd": "gait", "on": int(walk)})
 
     def read(self):
-        try:
-            data, addr = self.sock.recvfrom(2048)
-        except socket.timeout:
-            return None
-        self.robot_addr = addr
-        try:
-            return json.loads(data)
-        except json.JSONDecodeError:
-            return None
+        return self.link.read()
+
+    def set_stuck(self, leg):                   # only does something on a SIM_SENSORS robot
+        if self.sim:
+            self.link.send({"cmd": "sim_jam", "leg": leg})
+
+    def toggle_gait(self):
+        self.walking = not self.walking
+        self.link.send({"cmd": "gait", "on": int(self.walking)})
 
     def heartbeat(self):
-        if self.robot_addr:
-            self.sock.sendto(b'{"cmd":"hb"}', self.robot_addr)
+        self.link.heartbeat()
+
+    def close(self):
+        self.link.close()
 
 
 # ---------------------------------------------------------------- auto labels (fake only)
@@ -175,6 +184,8 @@ def log_trial(source, trial, out_dir, duration, auto, seed):
             key = keys.get()
             if key == "q":
                 break
+            if key == "g" and hasattr(source, "toggle_gait"):
+                source.toggle_gait()
             if key in ("0", "1", "2", "3", "4"):
                 label = int(key)
                 if hasattr(source, "set_stuck"):
@@ -199,6 +210,8 @@ def log_trial(source, trial, out_dir, duration, auto, seed):
                 last_print = now
             if duration and t_s >= duration:
                 break
+    if hasattr(source, "close"):
+        source.close()
     print(f"\nsaved {n} samples -> {path}")
     return path
 
@@ -206,7 +219,8 @@ def log_trial(source, trial, out_dir, duration, auto, seed):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--source", choices=["fake", "serial", "udp"], default="fake")
-    ap.add_argument("--port", default="4210", help="serial port (COM5, /dev/ttyUSB0) or UDP port")
+    ap.add_argument("--port", default="COM5", help="serial port for --source serial (COM5, /dev/ttyUSB0)")
+    ap.add_argument("--robot-ip", default=None, help="--source udp: skip discovery and use this address")
     ap.add_argument("--baud", type=int, default=921600)
     ap.add_argument("--rate", type=float, default=50, help="fake robot sample rate, Hz")
     ap.add_argument("--out", default="data")
@@ -229,7 +243,7 @@ def main():
         elif args.source == "serial":
             source = SerialSource(args.port, args.baud)
         else:
-            source = UdpSource(int(args.port))
+            source = UdpSource(args.robot_ip)
         trial = args.name or time.strftime("trial_%Y%m%d_%H%M%S")
         if args.trials > 1:
             trial = f"{trial}_{i:03d}"
