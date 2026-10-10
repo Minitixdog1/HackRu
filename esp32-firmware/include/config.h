@@ -91,3 +91,4 @@ static const float PHASE_OFFSET[4] = {0.0f, 0.5f, 0.5f, 0.0f};   // diagonal pai
 #define UNSTICK_MS 1500              // wiggle the stuck leg this long, then resume walking
 #define UNSTICK_AMP_DEG 15.0f
 #define UNSTICK_FREQ_HZ 4.0f
+#define SIM_UNSTICK_FREE_CHANCE 0.6f  // SIM_SENSORS only: chance one wiggle frees a jammed leg

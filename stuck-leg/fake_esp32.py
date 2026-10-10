@@ -24,6 +24,7 @@ RATE_HZ = 50
 HEARTBEAT_TIMEOUT_S = 0.3
 PC_IDLE_S = 2.0
 UNSTICK_S = 1.5
+UNSTICK_FREE_CHANCE = 0.6     # chance one unstick wiggle frees a jammed leg (real legs: depends on the snag)
 
 
 class FakeEsp32:
@@ -44,6 +45,7 @@ class FakeEsp32:
         self.attached = [True] * 4
         self.jam = -1
         self.unstick_until = 0.0
+        self.unstick_leg = -1
         self.last_msg = None
         self.t0 = time.monotonic()
         self._stop = threading.Event()
@@ -67,8 +69,10 @@ class FakeEsp32:
             self.walking = False
         elif cmd == "unstick" and leg >= 0 and self.walking:
             self.unstick_until = time.monotonic() + UNSTICK_S
+            self.unstick_leg = leg
         elif cmd == "resume":
             self.unstick_until = 0.0
+            self.unstick_leg = -1
         elif cmd == "detach" and leg >= 0:
             self.attached[leg] = False
             if self.jam == leg:                 # a dropped leg can't stay stuck
@@ -103,6 +107,12 @@ class FakeEsp32:
             except ValueError:
                 pass
         now = time.monotonic()
+        if self.unstick_leg >= 0 and now >= self.unstick_until:     # wiggle finished: did it come loose?
+            if self.unstick_leg == self.jam and self.rng.random() < UNSTICK_FREE_CHANCE:
+                self.jam = -1
+                self.robot.set_stuck(None)
+                self.log(f"[fake ESP32] wiggling freed {LEGS[self.unstick_leg]}")
+            self.unstick_leg = -1
         if self.walking and now - self.last_pc > HEARTBEAT_TIMEOUT_S:
             self.walking = False
             self.log("[fake ESP32] no heartbeat from PC: motors off")

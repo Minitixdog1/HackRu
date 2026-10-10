@@ -58,7 +58,7 @@ python dashboard.py --no-llm                   # buttons only
 - **Leg colors:** green = fine, yellow = maybe stuck, red = stuck, orange = being freed, gray = detached. The legs swing using the real encoder angles, so a stuck leg visibly freezes.
 - **Turning:** Left/Right (and Qwen's turn action) rotate by an angle, then carry on straight. How fast the robot turns is set by `TURN_RATE_DEG_S` in `common.py`. Time a full 360° on the real robot and update it so 90° really means 90°.
 - **Right:** each leg's stuck probability against the release threshold (dotted line), a log of everything that happened, Walk/Turn/Stop/Reattach buttons, and a box for typing commands to Qwen.
-- **Jam a leg:** these buttons appear when the robot has simulated sensors (the ESP32's fake-sensor mode, or `--demo`). Use them to show the stuck-leg model working.
+- **Jam a leg:** these buttons appear when the robot has simulated sensors (the ESP32's fake-sensor mode, or `--demo`). Use them to show the stuck-leg model working. In the sim, each unstick wiggle frees the leg 60% of the time (`UNSTICK_FREE_CHANCE` in `fake_esp32.py`, `SIM_UNSTICK_FREE_CHANCE` in the firmware's `config.h`), so you'll see both outcomes: freed, or detached after two failed tries. **Clear jam** removes the simulated jam by hand; a leg that was already detached needs **Reattach all**.
 
 Only one program can talk to the robot at a time, so run the dashboard *instead of* `live.py` or `commander.py`, not alongside them.
 

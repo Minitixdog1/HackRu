@@ -331,6 +331,8 @@ struct Sim {
   float bump = 0, turn = 0, turnTarget = 0;
   int jam = -1;                  // jammed leg, -1 = none
   float strength = 1.0f;         // 1 = hard jam, <1 = partial snag
+  int unstickSeen = -1;          // leg being wiggled at the last step
+  bool freeAfterUnstick = false; // rolled when the unstick command arrived
 };
 static Sim sim;
 static const int CORNER_X[4] = {1, 1, -1, -1};   // +1 = front
@@ -393,10 +395,20 @@ static void simStep(float dt) {
   sim.tilt[1] += (tPitch - sim.tilt[1]) * fminf(1.0f, 4 * dt);
   float roll = sim.tilt[0] + sim.terrain[0], pitch = sim.tilt[1] + sim.terrain[1];
   float ph, turnCmd;
+  int unstickNow;
   portENTER_CRITICAL(&mux);
   ph = S.phase;
   turnCmd = S.gaitTurn;
+  unstickNow = S.unstickLeg;
   portEXIT_CRITICAL(&mux);
+  if (sim.unstickSeen >= 0 && unstickNow < 0) {          // a wiggle just finished: did it come loose?
+    if (sim.unstickSeen == sim.jam && sim.freeAfterUnstick) {
+      Serial.printf("Sim: wiggling freed %s\n", LEG_NAMES[sim.jam]);
+      sim.jam = -1;
+    }
+    sim.freeAfterUnstick = false;
+  }
+  sim.unstickSeen = unstickNow;
 
   float bounce = on ? 0.6f * sinf(2 * TWO_PI_F * ph) : 0.0f;
   float n = 0.25f * rough;
@@ -541,6 +553,9 @@ static void handlePacket(const char* data, int len, IPAddress ip, uint16_t port)
     }
     portEXIT_CRITICAL(&mux);
     Serial.printf("Unstick %s\n", LEG_NAMES[leg]);
+#if SIM_SENSORS
+    sim.freeAfterUnstick = urand() < SIM_UNSTICK_FREE_CHANCE;
+#endif
   } else if (strcmp(cmd, "resume") == 0) {
     portENTER_CRITICAL(&mux);
     S.unstickLeg = -1;

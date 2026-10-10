@@ -39,6 +39,8 @@ Rules:
   (still walking if it was walking, otherwise it stops). "turn left" / "turn right" with no angle
   means 90 degrees, "a little" means 30, "turn around" means 180.
 - "Go left for 3 seconds" = turn left 90, then walk 3 seconds. Never make the robot circle.
+- "Free the leg" / "unstick it" means unstick_leg on the leg that looks stuck (see the status line).
+  Tell the user whether it came loose. If it's still stuck, offer to try again or detach it.
 - Only call detach_leg if the user explicitly asks to remove, drop or detach a leg.
 - If you are unsure what the robot is doing, call get_status first.
 - If the user asks for something the robot can't do (jump, fetch, talk), say so briefly."""
@@ -63,7 +65,8 @@ TOOLS = [
         "name": "stop", "description": "Stop walking (motors off).",
         "parameters": {"type": "object", "properties": {}}}},
     {"type": "function", "function": {
-        "name": "unstick_leg", "description": "Wiggle one leg to free it if it is caught.",
+        "name": "unstick_leg",
+        "description": "Wiggle a stuck leg to free it (only works while walking). Reports whether it came loose.",
         "parameters": {"type": "object", "properties": {"leg": LEG_PARAM}, "required": ["leg"]}}},
     {"type": "function", "function": {
         "name": "detach_leg", "description": "Release one leg from the body. Only when the user asks.",
@@ -203,6 +206,26 @@ class RobotActions:
         return {"ok": True, "turned": f"{degrees:.0f} degrees {direction}",
                 "now": "walking straight" if was_walking else "stopped"}
 
+    def unstick(self, leg):
+        """Wiggle the leg, wait for the wiggle plus a recheck, then say whether it's still stuck."""
+        if leg not in LEGS:
+            return {"ok": False, "error": f"leg must be one of {LEGS}"}
+        if self.runner and not self.runner.gait_cmd["on"]:
+            self._send({"cmd": "gait", "on": 1, "freq": self.runner.gait_cmd["freq"], "turn": 0})
+            time.sleep(0.5)                          # the firmware only wiggles while walking
+        self._send({"cmd": "unstick", "leg": leg})
+        if not self.runner:
+            return {"ok": True, "leg": leg}
+        time.sleep(1.5 + 1.5)                        # 1.5 s wiggle, then ~1.5 s of walking to judge it
+        s = self.status()
+        if leg in s.get("detached", []):
+            return {"ok": True, "leg": leg, "result": "still stuck, so the robot detached it"}
+        if s.get("simulated"):                       # the sim knows the truth; the model lags a little
+            stuck = s.get("sim_jammed_leg") == leg
+        else:
+            stuck = leg in s.get("looks_stuck", [])
+        return {"ok": True, "leg": leg, "result": "still stuck" if stuck else "freed"}
+
     def status(self):
         if self.runner:
             return self.runner.snapshot()
@@ -227,6 +250,8 @@ class RobotActions:
         if name == "stop":
             self._send({"cmd": "gait", "on": 0})
             return {"ok": True, "walking": False}
+        if name == "unstick_leg":
+            return self.unstick(str(args.get("leg", "")).upper())
         if name in ("unstick_leg", "detach_leg", "attach_leg"):
             leg = str(args.get("leg", "")).upper()
             if leg not in LEGS:

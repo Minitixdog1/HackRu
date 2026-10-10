@@ -94,7 +94,7 @@ class Dashboard:
             tk.Label(jam, text="Jam a leg:", font=FONT, fg=MUTED, bg=PANEL).pack(side="left", padx=(0, 6))
             for leg in LEGS:
                 self._button(jam, leg, lambda l=leg: self.jam(l)).pack(side="left", padx=(0, 4))
-            self._button(jam, "Free", lambda: self.jam(None)).pack(side="left", padx=(6, 0))
+            self._button(jam, "Clear jam", lambda: self.jam(None)).pack(side="left", padx=(6, 0))
 
         tk.Label(panel, text="What happened", font=FONT_B, fg=TEXT, bg=PANEL).pack(anchor="w", padx=16, pady=(12, 2))
         self.log = tk.Text(panel, bg=BG, fg=TEXT, font=MONO, wrap="word", relief="flat", height=10,
@@ -169,8 +169,16 @@ class Dashboard:
         self.write("action", "reattach all legs")
 
     def jam(self, leg):
+        s = self.runner.snapshot()
+        if leg and leg in s["detached"]:
+            self.write("warn", f"{leg} is detached: press Reattach all first")
+            return
         self.runner.send({"cmd": "sim_jam", "leg": leg})
-        self.write("action", f"jammed {leg} (simulated)" if leg else "freed the jammed leg")
+        if leg:
+            self.write("action", f"jammed {leg} (simulated)")
+        else:
+            self.write("action", "cleared the simulated jam" + (f" (still detached: {', '.join(s['detached'])}; press "
+                       "Reattach all to put them back)" if s["detached"] else ""))
 
     def ask(self):
         text = self.entry.get().strip()

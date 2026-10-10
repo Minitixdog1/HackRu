@@ -107,7 +107,8 @@ class LiveRunner:
 
         for cmd in cmds:
             truth = f", truth {CLASS_NAMES[label]}" if self.sim else ""
-            self.event(f"auto: {describe(cmd)} (state {state}{truth})")
+            who = "watch-only, not sent" if self.watch_only else "auto"
+            self.event(f"{who}: {describe(cmd)} (state {state}{truth})")
             if not self.watch_only:
                 self.send(cmd)
         return msg
