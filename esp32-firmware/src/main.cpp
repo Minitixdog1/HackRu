@@ -9,12 +9,13 @@
 //                 {"cmd":"stop"}                  motors off
 //                 {"cmd":"unstick","leg":"FL"}    wiggle that leg for UNSTICK_MS, then resume walking
 //                 {"cmd":"resume"}                end an unstick early
-//                 {"cmd":"detach","leg":"FL"}     motor off + latch servo releases the leg
+//                 {"cmd":"detach","leg":"FL"}     motor off + latch servo releases the leg. Refused unless the
+//                                                 legs off afterwards are one leg or a diagonal pair (FL+RR, FR+RL)
 //                 {"cmd":"attach","leg":"FL"}     latch servo locks, leg rejoins the gait
 //                 {"cmd":"zero"}                  current leg angles become 0 degrees
-//                 {"cmd":"sim_jam","leg":"FL","s":1.0}  SIM_SENSORS only: jam a leg (leg null = free)
+//                 {"cmd":"sim_jam","leg":"FL","s":1.0}  SIM_SENSORS only: jam one more leg (leg null = free all)
 //   robot -> PC   {"t":ms,"imu":[ax,ay,az,gx,gy,gz],"tof":[4],"cur":[4],"enc":[4],"cmd":[4],
-//                  "ph":phase,"gait":0/1,"att":[4],"sim":0/1,"jam":-1..3}   at TELEMETRY_HZ
+//                  "ph":phase,"gait":0/1,"att":[4],"sim":0/1,"jam":-1..3,"jams":[4]}   at TELEMETRY_HZ
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -329,8 +330,8 @@ struct Sim {
   float tilt[2] = {0, 0};        // roll, pitch (rad)
   float terrain[2] = {0, 0};
   float bump = 0, turn = 0, turnTarget = 0;
-  int jam = -1;                  // jammed leg, -1 = none
-  float strength = 1.0f;         // 1 = hard jam, <1 = partial snag
+  bool jam[4] = {false, false, false, false};   // jammed legs (any number)
+  float strength[4] = {1, 1, 1, 1};             // 1 = hard jam, <1 = partial snag
   int unstickSeen = -1;          // leg being wiggled at the last step
   bool freeAfterUnstick = false; // rolled when the unstick command arrived
 };
@@ -370,26 +371,27 @@ static void simStep(float dt) {
     float current;
     if (!att[i] || !on) {                   // motor off: leg stays put, no load
       current = fabsf(gauss(5.0f));
-    } else if (i == sim.jam) {
-      float follow = 1.0f - sim.strength;
+    } else if (sim.jam[i]) {
+      float follow = 1.0f - sim.strength[i];
       sim.enc[i] += (c - sim.enc[i]) * fminf(1.0f, 8 * dt) * follow + gauss(0.4f);
-      current = (350 + 250 * sim.strength) + gauss(40);
-      sag[i] = -7 * sim.strength;
+      current = (350 + 250 * sim.strength[i]) + gauss(40);
+      sag[i] = -7 * sim.strength[i];
     } else {
       sim.enc[i] += (c - sim.enc[i]) * fminf(1.0f, 15 * dt) + gauss(0.6f * rough);
       float stance = (c < 0) ? 1.0f : 0.0f;  // foot on the ground half the cycle
       current = 120 + 1.2f * fabsf(dc) + 90 * stance + gauss(25 * rough);
     }
-    if (i == bumpLeg || (sim.bump > 0.3f && urand() < 0.15f)) current += 220 * sim.bump;
+    if (att[i] && on && (i == bumpLeg || (sim.bump > 0.3f && urand() < 0.15f))) current += 220 * sim.bump;
     cur[i] = fmaxf(0.0f, current);
   }
 
   float tRoll = 0, tPitch = 0, yaw = 0;
-  if (sim.jam >= 0 && on) {
-    float s = sim.strength;
-    tPitch = -0.06f * CORNER_X[sim.jam] * s;
-    tRoll = 0.06f * CORNER_Y[sim.jam] * s;
-    yaw = 15 * CORNER_Y[sim.jam] * s;
+  for (int i = 0; i < 4 && on; i++) {      // each jammed corner pulls the body toward it
+    if (!sim.jam[i]) continue;
+    float s = sim.strength[i];
+    tPitch += -0.06f * CORNER_X[i] * s;
+    tRoll += 0.06f * CORNER_Y[i] * s;
+    yaw += 15 * CORNER_Y[i] * s;
   }
   sim.tilt[0] += (tRoll - sim.tilt[0]) * fminf(1.0f, 4 * dt);
   sim.tilt[1] += (tPitch - sim.tilt[1]) * fminf(1.0f, 4 * dt);
@@ -402,9 +404,9 @@ static void simStep(float dt) {
   unstickNow = S.unstickLeg;
   portEXIT_CRITICAL(&mux);
   if (sim.unstickSeen >= 0 && unstickNow < 0) {          // a wiggle just finished: did it come loose?
-    if (sim.unstickSeen == sim.jam && sim.freeAfterUnstick) {
-      Serial.printf("Sim: wiggling freed %s\n", LEG_NAMES[sim.jam]);
-      sim.jam = -1;
+    if (sim.jam[sim.unstickSeen] && sim.freeAfterUnstick) {
+      Serial.printf("Sim: wiggling freed %s\n", LEG_NAMES[sim.unstickSeen]);
+      sim.jam[sim.unstickSeen] = false;
     }
     sim.freeAfterUnstick = false;
   }
@@ -561,11 +563,27 @@ static void handlePacket(const char* data, int len, IPAddress ip, uint16_t port)
     S.unstickLeg = -1;
     portEXIT_CRITICAL(&mux);
   } else if (strcmp(cmd, "detach") == 0 && leg >= 0) {
+    // Safety rule: the legs off afterwards must be just this one, or this one plus its
+    // diagonal partner (FL+RR, FR+RL). Otherwise the robot couldn't balance.
+    int partner = 3 - leg;
+    bool allowed = true;
     portENTER_CRITICAL(&mux);
-    S.attached[leg] = false;
-    if (S.unstickLeg == leg) S.unstickLeg = -1;
+    for (int i = 0; i < 4; i++) {
+      if (!S.attached[i] && i != leg && i != partner) allowed = false;
+    }
+    if (allowed) {
+      S.attached[leg] = false;
+      if (S.unstickLeg == leg) S.unstickLeg = -1;
+    }
     portEXIT_CRITICAL(&mux);
+    if (!allowed) {
+      Serial.printf("Refused detach %s: only diagonal pairs (FL+RR, FR+RL) can be off together\n", LEG_NAMES[leg]);
+      return;
+    }
     setServo(leg, SERVO_RELEASE_DEG);
+#if SIM_SENSORS
+    sim.jam[leg] = false;                 // a dropped leg can't stay stuck
+#endif
     Serial.printf("Detach %s\n", LEG_NAMES[leg]);
   } else if (strcmp(cmd, "attach") == 0 && leg >= 0) {
     setServo(leg, SERVO_LOCK_DEG);
@@ -582,9 +600,14 @@ static void handlePacket(const char* data, int len, IPAddress ip, uint16_t port)
   }
 #if SIM_SENSORS
   else if (strcmp(cmd, "sim_jam") == 0) {
-    sim.jam = leg;   // -1 frees it
-    sim.strength = doc["s"] | 1.0f;
-    Serial.printf("Sim: %s\n", leg >= 0 ? LEG_NAMES[leg] : "no leg jammed");
+    if (leg < 0) {                        // no leg: free them all
+      for (int i = 0; i < 4; i++) sim.jam[i] = false;
+      Serial.println("Sim: all legs freed");
+    } else if (S.attached[leg]) {         // jam one more leg
+      sim.jam[leg] = true;
+      sim.strength[leg] = doc["s"] | 1.0f;
+      Serial.printf("Sim: jammed %s\n", LEG_NAMES[leg]);
+    }
   }
 #endif
 }
@@ -603,20 +626,19 @@ static int buildTelemetry(char* buf, size_t size) {
   ph = S.phase;
   gait = S.gaitOn ? 1 : 0;
   portEXIT_CRITICAL(&mux);
+  int jams[4] = {0, 0, 0, 0}, jam = -1;
 #if SIM_SENSORS
-  int jam = sim.jam;
-#else
-  int jam = -1;
+  for (int i = 3; i >= 0; i--) if (sim.jam[i]) { jams[i] = 1; jam = i; }   // jam = first jammed leg
 #endif
   return snprintf(buf, size,
                   "{\"t\":%lu,\"imu\":[%.3f,%.3f,%.3f,%.2f,%.2f,%.2f],"
                   "\"tof\":[%.1f,%.1f,%.1f,%.1f],\"cur\":[%.1f,%.1f,%.1f,%.1f],"
                   "\"enc\":[%.2f,%.2f,%.2f,%.2f],\"cmd\":[%.2f,%.2f,%.2f,%.2f],"
-                  "\"ph\":%.3f,\"gait\":%d,\"att\":[%d,%d,%d,%d],\"sim\":%d,\"jam\":%d}",
+                  "\"ph\":%.3f,\"gait\":%d,\"att\":[%d,%d,%d,%d],\"sim\":%d,\"jam\":%d,\"jams\":[%d,%d,%d,%d]}",
                   (unsigned long)millis(), imu[0], imu[1], imu[2], imu[3], imu[4], imu[5],
                   tofMm[0], tofMm[1], tofMm[2], tofMm[3], cur[0], cur[1], cur[2], cur[3],
                   enc[0], enc[1], enc[2], enc[3], tgt[0], tgt[1], tgt[2], tgt[3],
-                  ph, gait, att[0], att[1], att[2], att[3], SIM_SENSORS, jam);
+                  ph, gait, att[0], att[1], att[2], att[3], SIM_SENSORS, jam, jams[0], jams[1], jams[2], jams[3]);
 }
 
 // ====================================================================== setup / loop

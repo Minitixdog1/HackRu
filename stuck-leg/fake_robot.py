@@ -34,8 +34,9 @@ class FakeRobot:
         self.t = 0.0
         self.phase = 0.0
         self.enc = {leg: 0.0 for leg in LEGS}
-        self.stuck_leg = None                    # None or "FL"/"FR"/"RL"/"RR"
-        self.stuck_strength = 1.0                # 1 = fully jammed, <1 = partial snag
+        self.stuck = {}                          # jammed legs: {"FL": strength}; 1 = hard jam, <1 = partial snag
+        self.detached = set()                    # legs that have come off: motor off, angle frozen
+        self.last_cmd = {leg: 0.0 for leg in LEGS}
         self.tilt = [0.0, 0.0]                   # roll, pitch (rad), low-pass filtered
         self.bump = 0.0
         self.terrain = [0.0, 0.0]                # slow ground slope under the robot (roll, pitch)
@@ -43,10 +44,36 @@ class FakeRobot:
         self.turn_target = 0.0
 
     def set_stuck(self, leg):
-        if leg != self.stuck_leg:
-            self.stuck_leg = leg
+        """Exactly this one leg jammed (None = no leg). Used by logger.py's single-leg labels."""
+        if leg is None:
+            if self.stuck:                       # same random draws as before, so datasets reproduce
+                self.rng.choice([1.0, 0.8, 0.5, 0.3])
+            self.stuck = {}
+        elif list(self.stuck) != [leg]:
             # Some snags are hard jams, some are partial (harder to detect).
-            self.stuck_strength = self.rng.choice([1.0, 0.8, 0.5, 0.3])
+            self.stuck = {leg: self.rng.choice([1.0, 0.8, 0.5, 0.3])}
+
+    def add_stuck(self, leg, strength=1.0):
+        """Jam one more leg, keeping any already jammed."""
+        self.stuck[leg] = strength
+
+    def free(self, leg=None):
+        """Free one leg, or every leg if leg is None."""
+        if leg is None:
+            self.stuck = {}
+        else:
+            self.stuck.pop(leg, None)
+
+    def detach(self, leg):
+        self.detached.add(leg)
+        self.stuck.pop(leg, None)
+
+    def attach(self, leg):
+        self.detached.discard(leg)
+
+    @property
+    def stuck_leg(self):
+        return next(iter(self.stuck), None)
 
     def step(self, dt):
         r = self.rng
@@ -72,18 +99,25 @@ class FakeRobot:
         cmd, enc, cur, tof = [], [], [], []
         sag = {leg: 0.0 for leg in LEGS}
         for leg in LEGS:
+            if leg in self.detached:             # no motor load, leg and command frozen where it came off
+                cmd.append(round(self.last_cmd[leg], 2))
+                enc.append(round(self.enc[leg], 2))
+                cur.append(round(abs(r.gauss(0, 5)), 1))
+                continue
             ph = 2 * math.pi * (self.phase + PHASE_OFFSET[leg])
             c = self.amp * math.sin(ph)
+            self.last_cmd[leg] = c
             dc = self.amp * 2 * math.pi * self.freq * math.cos(ph)  # deg/s
-            stuck = leg == self.stuck_leg
+            stuck = leg in self.stuck
             if stuck:
+                strength = self.stuck[leg]
                 # Encoder barely moves toward the command.
-                follow = 1.0 - self.stuck_strength
+                follow = 1.0 - strength
                 self.enc[leg] += (c - self.enc[leg]) * min(1.0, 8 * dt) * follow
                 self.enc[leg] += r.gauss(0, 0.4)
-                load = 350 + 250 * self.stuck_strength
+                load = 350 + 250 * strength
                 current = load * self.battery + r.gauss(0, 40)
-                sag[leg] = -7 * self.stuck_strength
+                sag[leg] = -7 * strength
             else:
                 # Normal tracking: first-order lag behind the command.
                 self.enc[leg] += (c - self.enc[leg]) * min(1.0, 15 * dt)
@@ -97,14 +131,13 @@ class FakeRobot:
             enc.append(round(self.enc[leg], 2))
             cur.append(round(max(0.0, current), 1))
 
-        # Body tilt: a stuck corner pulls that corner down and twists the body.
+        # Body tilt: each stuck corner pulls that corner down and twists the body.
         target_roll = target_pitch = yaw_rate = 0.0
-        if self.stuck_leg:
-            sx, sy = CORNER[self.stuck_leg]
-            s = self.stuck_strength
-            target_pitch = -0.06 * sx * s     # nose down if a front leg is stuck
-            target_roll = 0.06 * sy * s       # roll toward the stuck side
-            yaw_rate = 15 * sy * s            # deg/s, other legs push the body around it
+        for stuck_leg, s in self.stuck.items():
+            sx, sy = CORNER[stuck_leg]
+            target_pitch += -0.06 * sx * s    # nose down if a front leg is stuck
+            target_roll += 0.06 * sy * s      # roll toward the stuck side
+            yaw_rate += 15 * sy * s           # deg/s, other legs push the body around it
         self.tilt[0] += (target_roll - self.tilt[0]) * min(1.0, 4 * dt)
         self.tilt[1] += (target_pitch - self.tilt[1]) * min(1.0, 4 * dt)
         roll = self.tilt[0] + self.terrain[0]

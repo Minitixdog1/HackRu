@@ -8,8 +8,8 @@
 Keys while running:
   g      start / stop walking
   space  stop motors now
-  1-4    sim robot: jam leg FL/FR/RL/RR   (real robot: label that leg as stuck in the log)
-  0      sim robot: free the leg          (real robot: label "nothing stuck")
+  1-4    sim robot: jam leg FL/FR/RL/RR (two can be jammed)   (real robot: toggle that leg's "stuck" label)
+  0      sim robot: free all legs        (real robot: label "nothing stuck")
   a      reattach all legs and reset the release logic
   q      quit (motors stop)
 """
@@ -35,7 +35,7 @@ def main():
     ap.add_argument("--model", default="models/stuck_rf.joblib")
     ap.add_argument("--robot-ip", default=None)
     ap.add_argument("--rate", type=float, default=50, help="telemetry rate set in the firmware, Hz")
-    ap.add_argument("--cost-false", type=float, default=10, help="cost of dropping a good leg")
+    ap.add_argument("--cost-false", type=float, default=3, help="cost of dropping a good leg")
     ap.add_argument("--cost-stuck", type=float, default=1, help="cost of staying stuck a bit longer")
     ap.add_argument("--n", type=int, default=3, help="confident windows in a row before acting")
     ap.add_argument("--watch-only", action="store_true", help="never send unstick / detach")
@@ -75,10 +75,15 @@ def main():
                     runner.send({"cmd": "gait", "on": 0 if runner.walking else 1})
                 elif key == " ":
                     runner.send({"cmd": "stop"})
-                elif key in ("0", "1", "2", "3", "4"):
-                    runner.label = int(key)
+                elif key == "0":
+                    runner.label = set()
                     if sim:
-                        runner.send({"cmd": "sim_jam", "leg": LEGS[runner.label - 1] if runner.label else None})
+                        runner.send({"cmd": "sim_jam", "leg": None})
+                elif key in ("1", "2", "3", "4"):
+                    leg = LEGS[int(key) - 1]
+                    runner.label ^= {leg}
+                    if sim:
+                        runner.send({"cmd": "sim_jam", "leg": leg})
                 elif key == "a":
                     for leg in LEGS:
                         runner.send({"cmd": "attach", "leg": leg})
@@ -95,7 +100,9 @@ def main():
                 legs = " ".join(
                     f"{leg}:{'--off--' if not att[i] else (bar(p[i + 1]) if p is not None else '........')}"
                     for i, leg in enumerate(LEGS))
-                jam = f" jam={LEGS[msg['jam']]}" if sim and msg.get("jam", -1) >= 0 else ""
+                jammed = [LEGS[i] for i, j in enumerate(msg.get("jams", [])) if j] or (
+                    [LEGS[msg["jam"]]] if msg.get("jam", -1) >= 0 else [])
+                jam = f" jam={'+'.join(jammed)}" if sim and jammed else ""
                 print(f"\r{'WALK' if runner.walking else 'STOP'} {runner.ctl.state:8s} P(stuck) {legs}"
                       f"  {runner.hz:4.0f} Hz{jam}   ", end="", flush=True)
     except KeyboardInterrupt:

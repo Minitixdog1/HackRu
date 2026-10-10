@@ -173,11 +173,14 @@ class Dashboard:
         if leg and leg in s["detached"]:
             self.write("warn", f"{leg} is detached: press Reattach all first")
             return
+        if leg and leg in (s.get("sim_jammed_legs") or []):
+            self.write("info", f"{leg} is already jammed")
+            return
         self.runner.send({"cmd": "sim_jam", "leg": leg})
         if leg:
             self.write("action", f"jammed {leg} (simulated)")
         else:
-            self.write("action", "cleared the simulated jam" + (f" (still detached: {', '.join(s['detached'])}; press "
+            self.write("action", "cleared all simulated jams" + (f" (still detached: {', '.join(s['detached'])}; press "
                        "Reattach all to put them back)" if s["detached"] else ""))
 
     def ask(self):
@@ -293,7 +296,7 @@ class Dashboard:
                 c.create_line(*hip, *foot, fill=col, width=8, capstyle="round")
                 c.create_oval(foot[0] - LEG_R, foot[1] - LEG_R, foot[0] + LEG_R, foot[1] + LEG_R, fill=col, outline="")
             lab = body(fx * (BODY_L / 2 - 14) + swing, fy * (BODY_W / 2 + 58))
-            jammed = s.get("sim_jammed_leg") == leg
+            jammed = leg in (s.get("sim_jammed_legs") or [s.get("sim_jammed_leg")])
             c.create_text(*lab, text=leg + ("\n(jammed)" if jammed else ""), fill=TEXT, font=FONT_B, justify="center")
 
         corners = [body(BODY_L / 2, BODY_W / 2), body(BODY_L / 2, -BODY_W / 2),

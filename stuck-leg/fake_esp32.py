@@ -8,7 +8,8 @@ model reacts to it exactly as it would to the ESP32's simulated-sensor mode.
   python dashboard.py --demo           # starts one of these for you
 
 Commands it understands (same as the firmware): hello, hb, gait (on, freq,
-turn), stop, unstick, resume, detach, attach, zero, sim_jam.
+turn), stop, unstick, resume, detach, attach, zero, sim_jam. Like the firmware,
+it refuses a detach that would leave two non-diagonal legs off.
 """
 import argparse
 import json
@@ -17,7 +18,7 @@ import socket
 import threading
 import time
 
-from common import LEGS
+from common import LEGS, detach_refusal
 from fake_robot import FakeRobot
 
 RATE_HZ = 50
@@ -43,7 +44,7 @@ class FakeEsp32:
         self.walking = False
         self.turn = 0.0
         self.attached = [True] * 4
-        self.jam = -1
+        self.jams = set()                        # indices of jammed legs (any number)
         self.unstick_until = 0.0
         self.unstick_leg = -1
         self.last_msg = None
@@ -74,19 +75,23 @@ class FakeEsp32:
             self.unstick_until = 0.0
             self.unstick_leg = -1
         elif cmd == "detach" and leg >= 0:
+            reason = detach_refusal(self.attached, leg)
+            if reason:                          # same safety rule as the firmware
+                self.log(f"[fake ESP32] refused: {reason}")
+                return
             self.attached[leg] = False
-            if self.jam == leg:                 # a dropped leg can't stay stuck
-                self.jam = -1
-                self.robot.set_stuck(None)
+            self.jams.discard(leg)              # a dropped leg can't stay stuck
+            self.robot.detach(LEGS[leg])
         elif cmd == "attach" and leg >= 0:
             self.attached[leg] = True
-        elif cmd == "sim_jam":
-            self.jam = leg if leg >= 0 and self.attached[leg] else -1
-            self.robot.set_stuck(LEGS[self.jam] if self.jam >= 0 else None)
-            if self.jam >= 0 and "s" in msg:
-                self.robot.stuck_strength = float(msg["s"])
-            elif self.jam >= 0:
-                self.robot.stuck_strength = 1.0
+            self.robot.attach(LEGS[leg])
+        elif cmd == "sim_jam":                  # leg = jam one more leg; no leg = free them all
+            if leg < 0:
+                self.jams.clear()
+                self.robot.free()
+            elif self.attached[leg]:
+                self.jams.add(leg)
+                self.robot.add_stuck(LEGS[leg], float(msg.get("s", 1.0)))
 
     def _send(self, obj):
         if self.pc:
@@ -108,9 +113,9 @@ class FakeEsp32:
                 pass
         now = time.monotonic()
         if self.unstick_leg >= 0 and now >= self.unstick_until:     # wiggle finished: did it come loose?
-            if self.unstick_leg == self.jam and self.rng.random() < UNSTICK_FREE_CHANCE:
-                self.jam = -1
-                self.robot.set_stuck(None)
+            if self.unstick_leg in self.jams and self.rng.random() < UNSTICK_FREE_CHANCE:
+                self.jams.discard(self.unstick_leg)
+                self.robot.free(LEGS[self.unstick_leg])
                 self.log(f"[fake ESP32] wiggling freed {LEGS[self.unstick_leg]}")
             self.unstick_leg = -1
         if self.walking and now - self.last_pc > HEARTBEAT_TIMEOUT_S:
@@ -133,13 +138,8 @@ class FakeEsp32:
             imu = list(msg["imu"])
             imu[5] = round(imu[5] - 30 * self.turn, 2)   # turning right = negative yaw rate
             msg["imu"] = imu
-        for i in range(4):
-            if not self.attached[i]:             # detached leg: no motor load, angle frozen
-                msg["cur"][i] = round(abs(self.rng.gauss(0, 5)), 1)
-                if self.last_msg is not None:
-                    msg["enc"][i] = self.last_msg["enc"][i]
-                    msg["cmd"][i] = self.last_msg["cmd"][i]
-        msg.update(gait=int(self.walking), att=[int(a) for a in self.attached], sim=1, jam=self.jam)
+        msg.update(gait=int(self.walking), att=[int(a) for a in self.attached], sim=1,
+                   jam=min(self.jams) if self.jams else -1, jams=[int(i in self.jams) for i in range(4)])
         self.last_msg = msg
         if self.pc and now - self.last_pc < PC_IDLE_S:
             self._send(msg)

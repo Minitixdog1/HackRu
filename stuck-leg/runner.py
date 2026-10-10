@@ -10,12 +10,12 @@ import os
 import threading
 import time
 
-from common import CLASS_NAMES, CSV_COLS, LEGS, telemetry_to_row
+from common import CLASS_NAMES, CSV_COLS, LEGS, jam_flags, telemetry_to_row
 from decide import OnlineDetector, ReleaseController, release_threshold
 
 
 class LiveRunner:
-    def __init__(self, link, bundle=None, rate=50, cost_false=10, cost_stuck=1, n_consec=3,
+    def __init__(self, link, bundle=None, rate=50, cost_false=3, cost_stuck=1, n_consec=3,
                  watch_only=False, log_dir=None, on_event=None):
         self.link = link
         self.bundle = bundle                     # None = no model: telemetry + commands only
@@ -25,11 +25,12 @@ class LiveRunner:
         self.watch_only = watch_only
         self.on_event = on_event or (lambda text: None)
         self.sim = bool(link.info.get("sim"))
-        self.label = 0                           # keypress label for real-robot logs
+        self.label = set()                       # keypress labels for real-robot logs: stuck legs
         self.lock = threading.Lock()
         self.events = collections.deque(maxlen=20)
         self.det = OnlineDetector(bundle, rate) if bundle else None
-        self.ctl = ReleaseController(threshold=self.thr, n_consec=n_consec)
+        self.per_leg = bool(bundle and bundle.get("multilabel"))
+        self.ctl = self._controller()
         self.walking = False
         self.gait_cmd = {"on": False, "freq": 1.5, "turn": 0.0}   # last walk command sent
         self.p_last = None
@@ -63,9 +64,12 @@ class LiveRunner:
             self.events.append((time.strftime("%H:%M:%S"), text))
         self.on_event(text)
 
+    def _controller(self):
+        return ReleaseController(threshold=self.thr, n_consec=self.n_consec, per_leg=self.per_leg)
+
     def reset_controller(self):
         with self.lock:
-            self.ctl = ReleaseController(threshold=self.thr, n_consec=self.n_consec)
+            self.ctl = self._controller()
 
     # ------------------------------------------------------------ the loop
     def step(self):
@@ -82,8 +86,12 @@ class LiveRunner:
         if now - self._t0 >= 1.0:
             self.hz, self._n, self._t0 = self._n / (now - self._t0), 0, now
 
-        label = msg.get("jam", -1) + 1 if self.sim else self.label   # the sim robot knows the truth
+        if self.sim:                                # the sim robot knows the truth
+            label = msg["jams"] if "jams" in msg else msg.get("jam", -1) + 1
+        else:
+            label = self.label
         row = telemetry_to_row(msg, self.trial, label)
+        label = jam_flags(label).index(1) + 1 if any(jam_flags(label)) else 0
         if self._writer:
             self._writer.writerow(row)
 
@@ -97,7 +105,7 @@ class LiveRunner:
                 self.p_last = None
             elif self.det:
                 if not was_walking and self.ctl.state == "HOLD":
-                    self.ctl = ReleaseController(threshold=self.thr, n_consec=self.n_consec)
+                    self.ctl = self._controller()
                 self.ctl.attached = [bool(a) for a in msg.get("att", [1, 1, 1, 1])]
                 p = self.det.add(row)
                 if p is not None:
@@ -159,6 +167,7 @@ class LiveRunner:
                 "leg_angles": msg.get("enc", [0, 0, 0, 0]),
                 "simulated": self.sim,
                 "sim_jammed_leg": (LEGS[msg["jam"]] if self.sim and msg.get("jam", -1) >= 0 else None),
+                "sim_jammed_legs": ([LEGS[i] for i, j in enumerate(msg.get("jams", [])) if j] if self.sim else []),
                 "messages_per_second": round(self.hz),
                 "recent_events": [f"{t} {e}" for t, e in list(self.events)[-5:]],
             }

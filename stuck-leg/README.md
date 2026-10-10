@@ -19,6 +19,12 @@ Everything that runs on the laptop: the Wi-Fi link to the ESP32, stuck-leg detec
 | `dashboard.py` | Live 2D window: the dog from above, leg states, event log, Qwen chat box, and buttons |
 | `fake_esp32.py` | A pretend ESP32 on the laptop (same protocol) for testing with no hardware |
 
+## How it decides
+
+- **The model judges each leg on its own:** "is FL stuck?", "is FR stuck?", and so on. So it can flag two legs at once, and it knows what the robot looks like with a leg already off. Training data includes runs with one leg or a diagonal pair detached, and jams of two legs at once.
+- **Acting:** a leg gets wiggled when its stuck probability is at least 75% for 3 windows in a row (about 0.75 s). After two failed wiggles it's detached. It only counts as freed if its probability drops below 50%, so a leg hovering at 80% isn't mistaken for free.
+- **Which legs may come off:** one leg, or two that are diagonal: **FL+RR or FR+RL**. That keeps one front and one back leg on opposite sides, so the robot can still balance. If a leg that can't come off gets stuck (for example RL when FL is already off), the robot stops and waits for you. The firmware enforces the same rule, so even a direct detach command for the wrong leg is refused.
+
 ## Quick start
 
 ```bash
@@ -26,7 +32,7 @@ python -m venv .venv
 source .venv/bin/activate          # Windows: .venv\Scripts\activate
 pip install -r requirements.txt
 
-python logger.py --source fake --auto --trials 40 --duration 60 --fast
+python logger.py --source fake --auto --trials 60 --duration 60 --fast
 python baseline.py data/
 python train.py data/
 python decide.py models/stuck_rf.joblib data/fake_011.csv

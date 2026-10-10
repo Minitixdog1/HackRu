@@ -24,7 +24,7 @@ cd stuck-leg
 python -m venv .venv
 .venv\Scripts\activate             # macOS/Linux: source .venv/bin/activate
 pip install -r requirements.txt
-python logger.py --source fake --auto --trials 40 --duration 60 --fast   # fake training data
+python logger.py --source fake --auto --trials 60 --duration 60 --fast   # fake training data
 python train.py data/                                                    # the stuck-leg model
 ```
 

@@ -23,7 +23,7 @@ If the laptop goes quiet for 300 ms (script crashed, Wi-Fi dropped), the ESP32 t
 python robot_link.py              # should print "found robot" and ~50 messages/second
 
 # once: make fake training data and a model (data/ and models/ aren't in git)
-python logger.py --source fake --auto --trials 40 --duration 60 --fast
+python logger.py --source fake --auto --trials 60 --duration 60 --fast
 python train.py data/
 
 python live.py                    # robot starts "walking"; press 2 to jam FR and watch it react
@@ -95,11 +95,11 @@ All messages are JSON over UDP port 4210.
 | PC → robot | `{"cmd":"gait","on":1,"freq":1.5,"amp":25,"turn":0}` | Start/stop walking; `freq`, `amp`, `turn` optional (`turn` -1 = left … 1 = right) |
 | PC → robot | `{"cmd":"stop"}` | Motors off |
 | PC → robot | `{"cmd":"unstick","leg":"FR"}` | Wiggle that leg for 1.5 s, then resume walking |
-| PC → robot | `{"cmd":"detach","leg":"FR"}` | Motor off and latch servo releases |
+| PC → robot | `{"cmd":"detach","leg":"FR"}` | Motor off and latch servo releases. Refused unless the legs off afterwards are one leg or a diagonal pair (FL+RR or FR+RL) |
 | PC → robot | `{"cmd":"attach","leg":"FR"}` | Latch locks, leg rejoins the gait |
 | PC → robot | `{"cmd":"zero"}` | Current leg angles become 0° |
-| PC → robot | `{"cmd":"sim_jam","leg":"FR"}` | Sim mode only: jam a leg (`null` frees it) |
-| robot → PC | `{"t":..,"imu":[6],"tof":[4],"cur":[4],"enc":[4],"cmd":[4],"ph":..,"gait":..,"att":[4],"sim":..,"jam":..}` | Sensor data, 50 times a second |
+| PC → robot | `{"cmd":"sim_jam","leg":"FR"}` | Sim mode only: jam one more leg, so several can be jammed (`null` frees them all) |
+| robot → PC | `{"t":..,"imu":[6],"tof":[4],"cur":[4],"enc":[4],"cmd":[4],"ph":..,"gait":..,"att":[4],"sim":..,"jam":..,"jams":[4]}` | Sensor data, 50 times a second (`jams` = which legs are jammed in sim mode) |
 
 ## Troubleshooting
 

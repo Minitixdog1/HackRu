@@ -1,7 +1,7 @@
 """Log robot telemetry to CSV and label it live with keypresses.
 
 Keys while logging:
-  1-4  leg FL / FR / RL / RR is stuck now
+  1-4  leg FL / FR / RL / RR is stuck now (press again when it's free; two legs can be stuck)
   0    nothing is stuck
   g    start / stop walking (Wi-Fi robot)
   q    stop and save
@@ -16,7 +16,8 @@ Sources:
                     If the ESP32 runs with SIM_SENSORS 1, pressing 1-4 jams that leg on it.
 
 Generate a fake dataset with no keyboard at all:
-  python logger.py --source fake --auto --trials 40 --duration 60 --fast
+  python logger.py --source fake --auto --trials 60 --duration 60 --fast
+(includes runs with one leg or a diagonal pair already detached, and two legs jammed at once)
 """
 import argparse
 import csv
@@ -26,7 +27,7 @@ import random
 import sys
 import time
 
-from common import CSV_COLS, LEGS, CLASS_NAMES, telemetry_to_row
+from common import CSV_COLS, DIAGONAL_PAIRS, LEGS, telemetry_to_row
 
 HEARTBEAT_S = 0.1   # PC -> robot heartbeat; the ESP32 stops motors if it goes quiet
 
@@ -75,10 +76,23 @@ class FakeSource:
         if not self.fast:                       # pace at real time
             self._next += self.dt
             time.sleep(max(0.0, self._next - time.monotonic()))
-        return self.robot.step(self.dt)
+        msg = self.robot.step(self.dt)
+        msg["att"] = [int(leg not in self.robot.detached) for leg in LEGS]
+        return msg
 
-    def set_stuck(self, leg):                   # only the fake robot can be "jammed" by software
-        self.robot.set_stuck(leg)
+    def set_jams(self, legs):                   # only the fake robot can be "jammed" by software
+        for leg in list(self.robot.stuck):
+            if leg not in legs:
+                self.robot.free(leg)
+        for leg in legs:
+            if leg not in self.robot.stuck:
+                self.robot.add_stuck(leg, self.robot.rng.choice([1.0, 0.8, 0.5, 0.3]))
+
+    def set_detached(self, legs):
+        for leg in legs:
+            self.robot.detach(leg)
+
+
 
     def heartbeat(self):
         pass
@@ -116,9 +130,11 @@ class UdpSource:
     def read(self):
         return self.link.read()
 
-    def set_stuck(self, leg):                   # only does something on a SIM_SENSORS robot
+    def set_jams(self, legs):                   # only does something on a SIM_SENSORS robot
         if self.sim:
-            self.link.send({"cmd": "sim_jam", "leg": leg})
+            self.link.send({"cmd": "sim_jam", "leg": None})
+            for leg in legs:
+                self.link.send({"cmd": "sim_jam", "leg": leg})
 
     def toggle_gait(self):
         self.walking = not self.walking
@@ -135,40 +151,55 @@ class UdpSource:
 class AutoScheduler:
     """Randomly jams legs for 1.5-4 s, then frees them for 3-8 s.
 
+    Each trial also picks which legs are already off for the whole run: none (55%),
+    one leg (25%) or a diagonal pair (20%), so the model learns what a detached leg
+    looks like. About 1 jam in 4 jams two legs at once.
+
     The label lags the real change by 0.1-0.35 s, like a person's keypress would,
     so the fake labels are as imperfect as real ones.
     """
 
     def __init__(self, seed):
         self.rng = random.Random(seed)
-        self.leg = None
+        r = self.rng.random()
+        if r < 0.55:
+            self.detached = set()
+        elif r < 0.80:
+            self.detached = {self.rng.choice(LEGS)}
+        else:
+            self.detached = set(self.rng.choice(DIAGONAL_PAIRS))
+        self.attached = [leg for leg in LEGS if leg not in self.detached]
+        self.legs = set()
         self.until = self.rng.uniform(3, 8)
-        self.label_leg = None
-        self.pending = []                 # (time the label catches up, leg)
+        self.label_legs = set()
+        self.pending = []                 # (time the label catches up, legs)
 
     def update(self, t):
-        """Return (leg physically stuck now, leg the label says is stuck)."""
+        """Return (legs physically stuck now, legs the label says are stuck)."""
         if t >= self.until:
-            if self.leg is None:
-                self.leg = self.rng.choice(LEGS)
+            if not self.legs:
+                n = 2 if len(self.attached) >= 2 and self.rng.random() < 0.25 else 1
+                self.legs = set(self.rng.sample(self.attached, n))
                 # Most jams are short; about 1 in 8 is "really stuck" (8-12 s).
                 long_jam = self.rng.random() < 0.125
                 self.until = t + (self.rng.uniform(8, 12) if long_jam else self.rng.uniform(1.5, 4.0))
             else:
-                self.leg = None
+                self.legs = set()
                 self.until = t + self.rng.uniform(3.0, 8.0)
-            self.pending.append((t + self.rng.uniform(0.1, 0.35), self.leg))
+            self.pending.append((t + self.rng.uniform(0.1, 0.35), set(self.legs)))
         while self.pending and self.pending[0][0] <= t:
-            self.label_leg = self.pending.pop(0)[1]
-        return self.leg, self.label_leg
+            self.label_legs = self.pending.pop(0)[1]
+        return self.legs, self.label_legs
 
 
 # ---------------------------------------------------------------- main loop
 def log_trial(source, trial, out_dir, duration, auto, seed):
     os.makedirs(out_dir, exist_ok=True)
     path = os.path.join(out_dir, f"{trial}.csv")
-    label = 0
+    jams = set()                                  # legs the label says are stuck
     sched = AutoScheduler(seed) if auto else None
+    if sched and sched.detached:
+        source.set_detached(sched.detached)
     n = 0
     last_hb = last_print = 0.0
     t0 = None
@@ -186,10 +217,12 @@ def log_trial(source, trial, out_dir, duration, auto, seed):
                 break
             if key == "g" and hasattr(source, "toggle_gait"):
                 source.toggle_gait()
-            if key in ("0", "1", "2", "3", "4"):
-                label = int(key)
-                if hasattr(source, "set_stuck"):
-                    source.set_stuck(LEGS[label - 1] if label else None)
+            if key == "0":
+                jams = set()
+            elif key in ("1", "2", "3", "4"):
+                jams ^= {LEGS[int(key) - 1]}          # press again to mark it free
+            if key in ("0", "1", "2", "3", "4") and hasattr(source, "set_jams"):
+                source.set_jams(jams)
 
             msg = source.read()
             if msg is None:
@@ -198,15 +231,15 @@ def log_trial(source, trial, out_dir, duration, auto, seed):
             t_s = (msg["t"] - t0) / 1000
 
             if sched:
-                leg, label_leg = sched.update(t_s)
-                source.set_stuck(leg)
-                label = LEGS.index(label_leg) + 1 if label_leg else 0
+                physical, jams = sched.update(t_s)
+                source.set_jams(physical)
 
-            writer.writerow(telemetry_to_row(msg, trial, label))
+            writer.writerow(telemetry_to_row(msg, trial, jams))
             n += 1
 
             if not auto and now - last_print > 1.0:
-                print(f"\r t={t_s:6.1f}s  samples={n:6d}  label={CLASS_NAMES[label]:9s}", end="", flush=True)
+                stuck = "+".join(leg for leg in LEGS if leg in jams) or "nothing"
+                print(f"\r t={t_s:6.1f}s  samples={n:6d}  stuck={stuck:12s}", end="", flush=True)
                 last_print = now
             if duration and t_s >= duration:
                 break
@@ -248,7 +281,7 @@ def main():
         if args.trials > 1:
             trial = f"{trial}_{i:03d}"
         if not args.auto:
-            print("keys: 1-4 = FL/FR/RL/RR stuck, 0 = free, q = stop")
+            print("keys: 1-4 = toggle FL/FR/RL/RR stuck, 0 = all free, g = walk on/off, q = stop")
         log_trial(source, trial, args.out, args.duration, args.auto, seed)
 
 

@@ -21,7 +21,7 @@ import time
 import urllib.error
 import urllib.request
 
-from common import LEGS, TURN_RATE_DEG_S
+from common import LEGS, TURN_RATE_DEG_S, detach_refusal
 
 SPEEDS = {"slow": 1.0, "normal": 1.5, "fast": 2.0}   # gait cycles per second
 MAX_WALK_S = 30
@@ -42,6 +42,8 @@ Rules:
 - "Free the leg" / "unstick it" means unstick_leg on the leg that looks stuck (see the status line).
   Tell the user whether it came loose. If it's still stuck, offer to try again or detach it.
 - Only call detach_leg if the user explicitly asks to remove, drop or detach a leg.
+- At most two legs can be off at once, and only as a diagonal pair: FL+RR or FR+RL. If the user
+  asks for another combination, the tool refuses; explain why (the robot couldn't balance).
 - If you are unsure what the robot is doing, call get_status first.
 - If the user asks for something the robot can't do (jump, fetch, talk), say so briefly."""
 
@@ -221,7 +223,7 @@ class RobotActions:
         if leg in s.get("detached", []):
             return {"ok": True, "leg": leg, "result": "still stuck, so the robot detached it"}
         if s.get("simulated"):                       # the sim knows the truth; the model lags a little
-            stuck = s.get("sim_jammed_leg") == leg
+            stuck = leg in (s.get("sim_jammed_legs") or [s.get("sim_jammed_leg")])
         else:
             stuck = leg in s.get("looks_stuck", [])
         return {"ok": True, "leg": leg, "result": "still stuck" if stuck else "freed"}
@@ -256,6 +258,11 @@ class RobotActions:
             leg = str(args.get("leg", "")).upper()
             if leg not in LEGS:
                 return {"ok": False, "error": f"leg must be one of {LEGS}"}
+            if name == "detach_leg":
+                attached = [l in self.status().get("attached", LEGS) for l in LEGS]
+                reason = detach_refusal(attached, LEGS.index(leg))
+                if reason:
+                    return {"ok": False, "error": reason}
             self._send({"cmd": name.split("_")[0], "leg": leg})
             if name == "attach_leg" and self.runner:
                 self.runner.reset_controller()
