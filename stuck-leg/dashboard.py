@@ -354,6 +354,7 @@ def main():
     ap.add_argument("--llm-url", default=os.environ.get("LLM_URL", "http://localhost:11434"))
     ap.add_argument("--llm-model", default=os.environ.get("LLM_MODEL", "qwen3.5:4b"))
     ap.add_argument("--no-llm", action="store_true", help="buttons only, no Qwen")
+    ap.add_argument("--no-enc", action="store_true", help="with --demo: the pretend robot has no encoders (like the real one)")
     args = ap.parse_args()
 
     from robot_link import RobotLink
@@ -362,7 +363,7 @@ def main():
     fake = None
     if args.demo:
         from fake_esp32 import FakeEsp32
-        fake = FakeEsp32(port=4210, host="127.0.0.1", log=lambda t: None).start()
+        fake = FakeEsp32(port=4210, host="127.0.0.1", log=lambda t: None, encoders=not args.no_enc).start()
         args.robot_ip = "127.0.0.1"
 
     bundle = None

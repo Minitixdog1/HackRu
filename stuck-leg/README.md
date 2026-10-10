@@ -51,6 +51,20 @@ python logger.py --source udp   # collect real labeled data (g = walk, 1-4 = stu
 
 Add `--robot-ip 192.168.4.1` (or the IP on the serial monitor) if discovery doesn't find it.
 
+### No encoders (the ESP32-C3 robot)
+
+Our real robot has no encoders, and the ESP32-C3 sketch ([`../arduino-esp32c3`](../arduino-esp32c3/)) reports
+each leg's angle as equal to its command. Train a model that doesn't rely on encoders:
+
+```bash
+python logger.py --source fake --auto --trials 60 --duration 60 --fast --no-enc --out data/noenc
+python train.py data/noenc            # prints "encoder data: none" and learns from current, IMU, ToF
+python dashboard.py --demo --no-enc   # try it with the pretend robot
+```
+
+The model file remembers whether it was trained with encoders. `live.py` and the dashboard warn you
+if that doesn't match the robot.
+
 ## The dashboard
 
 ```bash

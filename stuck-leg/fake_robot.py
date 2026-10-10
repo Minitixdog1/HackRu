@@ -3,7 +3,8 @@ can be built and tested before the real ESP32 is streaming.
 
 It is NOT a physics simulation. It just shapes each signal the way a stuck leg
 roughly would:
-  - encoder: the stuck leg stops following its command
+  - encoder: the stuck leg stops following its command (only with encoders=True;
+             the real robot has none, so encoders=False reports angle = command)
   - current: the stuck leg's motor strains toward stall current
   - IMU:     the body tilts and twists toward the stuck corner
   - ToF:     the stuck corner of the body sags
@@ -23,8 +24,11 @@ G = 9.81
 
 
 class FakeRobot:
-    def __init__(self, seed=None):
+    def __init__(self, seed=None, encoders=True):
         self.rng = random.Random(seed)
+        # Our real robot has no encoders. With encoders=False the reported angle is just the
+        # command (nothing measures it), so the model has to learn from current, IMU and ToF.
+        self.encoders = encoders
         r = self.rng
         # Per-trial variation: makes trials differ the way real sessions would.
         self.freq = r.uniform(1.0, 2.2)          # gait cycles per second
@@ -166,6 +170,7 @@ class FakeRobot:
         return {
             "t": int(self.t * 1000),
             "imu": [round(v, 3) for v in (ax, ay, az, gx, gy, gz)],
-            "tof": tof, "cur": cur, "enc": enc, "cmd": cmd,
+            "tof": tof, "cur": cur, "enc": enc if self.encoders else list(cmd), "cmd": cmd,
+            "enc_ok": int(self.encoders),
             "ph": round(self.phase, 3),
         }

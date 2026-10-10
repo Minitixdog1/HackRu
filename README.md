@@ -13,6 +13,7 @@ you: "walk forward for 3 seconds"
 | Folder | What's in it |
 | --- | --- |
 | [`esp32-firmware/`](esp32-firmware/) | PlatformIO project for the ESP32: Wi-Fi, telemetry, gait, unstick/detach, and a fake-sensor mode for testing with a bare board. Wiring and pins are in its README. |
+| [`arduino-esp32c3/`](arduino-esp32c3/) | The same robot code for our **ESP32-C3**, as an **Arduino IDE** sketch: no encoders, open-loop N20 motors, and a mode where the real motors walk while simulated sensors feed the ML. |
 | [`stuck-leg/`](stuck-leg/) | Laptop code: Wi-Fi link, stuck-leg ML (logging, training, live detection), the Qwen commander, and the 2D dashboard. |
 | [`Onshapefile/`](Onshapefile/) | CAD: STEP exports of the hub, top platform, leg arms, leg spokes and full assembly, with previews and a part-by-part explanation. |
 
@@ -43,5 +44,7 @@ A window opens with the dog. Click **Walk**, then **Jam a leg: FR**, and watch t
 python robot_link.py      # finds the ESP32
 python dashboard.py       # same window, now driving the ESP32
 ```
+
+**Using the ESP32-C3 with the Arduino IDE?** Open `arduino-esp32c3/RobotDogC3/RobotDogC3.ino` instead and follow [`arduino-esp32c3/README.md`](arduino-esp32c3/README.md). Train the model with `--no-enc`, since that robot has no encoders.
 
 Details: [`esp32-firmware/README.md`](esp32-firmware/README.md) and [`stuck-leg/README.md`](stuck-leg/README.md).

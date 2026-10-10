@@ -7,6 +7,9 @@ Leg i is called stuck when it has been straining for at least FRAC of the
 last HOLD_MS. (A fraction, not "every sample", because a jammed leg's error
 briefly passes through zero each time the command swings past the frozen angle.)
 Each leg is judged on its own, so two legs can be stuck at once. Detached legs are never stuck.
+With no encoders (angle always equals command) the first test can't be checked, so the
+rule falls back to the current alone, and it must stay high for the WHOLE hold time
+(a walking leg's current dips every stride; a jammed one stays up).
 
 Run:  python baseline.py data/
 """
@@ -30,9 +33,13 @@ def baseline_predict(df, eps=EPS_DEG, cur_ma=CUR_MA, hold_ms=HOLD_MS, frac=FRAC)
     for _, d in df.groupby("trial", sort=False):
         idx = d.index.to_numpy()
         n_hold = max(1, int(round(hold_ms / 1000 * sample_rate(d))))
+        has_enc = max(d[f"err_{leg}"].abs().max() for leg in LEGS) > 0.01
         for i, leg in enumerate(LEGS):
-            strain = (d[f"err_{leg}"].abs() > eps) & (d[f"cur_{leg}"] > cur_ma) & (d[ATT_COLS[i]] > 0)
-            out[idx, i] = strain.rolling(n_hold, min_periods=n_hold).mean().fillna(0).to_numpy() >= frac
+            strain = (d[f"cur_{leg}"] > cur_ma) & (d[ATT_COLS[i]] > 0)
+            if has_enc:
+                strain &= d[f"err_{leg}"].abs() > eps
+            need = frac if has_enc else 1.0
+            out[idx, i] = strain.rolling(n_hold, min_periods=n_hold).mean().fillna(0).to_numpy() >= need
     return out
 
 

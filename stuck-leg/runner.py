@@ -28,6 +28,11 @@ class LiveRunner:
         self.label = set()                       # keypress labels for real-robot logs: stuck legs
         self.lock = threading.Lock()
         self.events = collections.deque(maxlen=20)
+        robot_enc = bool(link.info.get("enc", 1))
+        model_enc = bool(bundle.get("encoders", True)) if bundle else robot_enc
+        if robot_enc != model_enc:
+            self.event("WARNING: model was trained " + ("with" if model_enc else "without") + " encoders but the robot has "
+                       + ("them" if robot_enc else "none") + "; retrain (logger.py --no-enc / real logs) for good results")
         self.det = OnlineDetector(bundle, rate) if bundle else None
         self.per_leg = bool(bundle and bundle.get("multilabel"))
         self.ctl = self._controller()

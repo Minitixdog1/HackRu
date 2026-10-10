@@ -29,14 +29,14 @@ UNSTICK_FREE_CHANCE = 0.6     # chance one unstick wiggle frees a jammed leg (re
 
 
 class FakeEsp32:
-    def __init__(self, port=4210, host="0.0.0.0", seed=None, log=print):
+    def __init__(self, port=4210, host="0.0.0.0", seed=None, log=print, encoders=True):
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         self.sock.bind((host, port))
         self.sock.setblocking(False)
         self.log = log
         self.rng = random.Random(seed)
-        self.robot = FakeRobot(seed)
+        self.robot = FakeRobot(seed, encoders=encoders)
         self.robot.amp = 25.0
         self.robot.freq = 1.5
         self.pc = None
@@ -60,7 +60,7 @@ class FakeEsp32:
         cmd = msg.get("cmd", "")
         leg = LEGS.index(msg["leg"]) if msg.get("leg") in LEGS else -1
         if cmd == "hello":
-            self._send({"hello": "robotdog", "sim": 1, "ap": 0, "fake": 1})
+            self._send({"hello": "robotdog", "sim": 1, "ap": 0, "fake": 1, "enc": int(self.robot.encoders)})
         elif cmd == "gait":
             self.walking = bool(msg.get("on", 1))
             self.robot.freq = float(msg.get("freq", self.robot.freq))
@@ -166,8 +166,9 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=4210)
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--no-enc", action="store_true", help="no encoders, like the real robot")
     args = ap.parse_args()
-    fake = FakeEsp32(args.port, seed=args.seed)
+    fake = FakeEsp32(args.port, seed=args.seed, encoders=not args.no_enc)
     print(f"fake ESP32 listening on UDP port {args.port}. Connect with --robot-ip 127.0.0.1 (Ctrl+C to quit)")
     try:
         fake.run()

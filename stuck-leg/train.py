@@ -18,7 +18,7 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.model_selection import GroupKFold, GroupShuffleSplit, train_test_split
 
 from baseline import baseline_windows, window_attached
-from common import LEGS
+from common import CMD_COLS, ENC_COLS, LEGS
 from features import HOP_S, WIN_S, load_logs, make_windows
 from metrics import report, stuck_metrics
 
@@ -80,6 +80,9 @@ def main():
     n_trials = len(set(groups))
     att = window_attached(X)
     print(f"{len(X)} windows from {n_trials} trials, {X.shape[1]} features")
+    # No encoders (ESP32-C3 robot, logger --no-enc): the logged angle always equals the command.
+    encoders = not np.allclose(df[ENC_COLS].to_numpy(), df[CMD_COLS].to_numpy(), atol=0.01)
+    print("encoder data: " + ("yes" if encoders else "none (angle = command), learning from current, IMU and ToF"))
     print("stuck windows per leg: " + ", ".join(f"{leg}={int(Y[:, i].sum())}" for i, leg in enumerate(LEGS))
           + f";  two legs at once: {int((Y.sum(axis=1) == 2).sum())};  with a leg off: {int((~att).any(axis=1).sum())}")
 
@@ -116,7 +119,7 @@ def main():
 
     os.makedirs(os.path.dirname(args.out) or ".", exist_ok=True)
     joblib.dump({"model": model, "features": list(X.columns), "win_s": WIN_S, "hop_s": HOP_S,
-                 "legs": LEGS, "multilabel": True}, args.out)
+                 "legs": LEGS, "multilabel": True, "encoders": encoders}, args.out)
     print(f"\nsaved model -> {args.out}")
 
     if args.export_c:

@@ -65,9 +65,9 @@ class KeyReader:
 
 # ---------------------------------------------------------------- sources
 class FakeSource:
-    def __init__(self, seed, rate_hz, fast):
+    def __init__(self, seed, rate_hz, fast, encoders=True):
         from fake_robot import FakeRobot
-        self.robot = FakeRobot(seed)
+        self.robot = FakeRobot(seed, encoders=encoders)
         self.dt = 1.0 / rate_hz
         self.fast = fast
         self._next = time.monotonic()
@@ -263,6 +263,8 @@ def main():
     ap.add_argument("--trials", type=int, default=1, help="with --auto: how many trials to generate")
     ap.add_argument("--fast", action="store_true", help="fake only: don't wait for real time")
     ap.add_argument("--seed", type=int, default=None)
+    ap.add_argument("--no-enc", action="store_true",
+                    help="fake only: pretend there are no encoders, like the real robot (ESP32-C3 sketch)")
     args = ap.parse_args()
 
     if args.auto and args.source != "fake":
@@ -272,7 +274,7 @@ def main():
     for i in range(args.trials):
         seed = base_seed + i
         if args.source == "fake":
-            source = FakeSource(seed, args.rate, args.fast)
+            source = FakeSource(seed, args.rate, args.fast, encoders=not args.no_enc)
         elif args.source == "serial":
             source = SerialSource(args.port, args.baud)
         else:
