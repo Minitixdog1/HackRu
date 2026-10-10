@@ -56,6 +56,7 @@ python dashboard.py --no-llm                   # buttons only
 
 - **Left:** the dog seen from above, with its path. Position is estimated from the commands, since the robot has no position sensor.
 - **Leg colors:** green = fine, yellow = maybe stuck, red = stuck, orange = being freed, gray = detached. The legs swing using the real encoder angles, so a stuck leg visibly freezes.
+- **Turning:** Left/Right (and Qwen's turn action) rotate by an angle, then carry on straight. How fast the robot turns is set by `TURN_RATE_DEG_S` in `common.py`. Time a full 360° on the real robot and update it so 90° really means 90°.
 - **Right:** each leg's stuck probability against the release threshold (dotted line), a log of everything that happened, Walk/Turn/Stop/Reattach buttons, and a box for typing commands to Qwen.
 - **Jam a leg:** these buttons appear when the robot has simulated sensors (the ESP32's fake-sensor mode, or `--demo`). Use them to show the stuck-leg model working.
 

@@ -19,7 +19,7 @@ import threading
 import time
 import tkinter as tk
 
-from common import LEGS
+from common import LEGS, TURN_RATE_DEG_S
 
 # ------------------------------------------------------------------ look
 BG = "#0f1419"
@@ -85,7 +85,7 @@ class Dashboard:
 
         buttons = tk.Frame(panel, bg=PANEL)
         buttons.pack(fill="x", padx=16, pady=(8, 0))
-        for text, cmd in [("Walk", self.walk), ("◀ Left", lambda: self.walk(-0.6)), ("Right ▶", lambda: self.walk(0.6)),
+        for text, cmd in [("Walk", self.walk), ("◀ Left", lambda: self.turn(-1)), ("Right ▶", lambda: self.turn(1)),
                           ("Stop", self.stop), ("Reattach all", self.reattach)]:
             self._button(buttons, text, cmd).pack(side="left", padx=(0, 6))
         if self.sim:
@@ -121,7 +121,7 @@ class Dashboard:
             self.write("warn", "No stuck-leg model loaded: run  python train.py data/  first. Legs stay gray-green.")
         if llm_note:
             self.write("warn" if commander is None else "info", llm_note)
-        self.write("info", "Try: \"walk forward for 3 seconds\", \"turn right\", or press Jam FR and watch.")
+        self.write("info", "Try: \"walk forward for 3 seconds\", \"turn left then walk 2 seconds\", or press Jam FR.")
         self.tick()
 
     # ------------------------------------------------------------ widgets
@@ -143,6 +143,20 @@ class Dashboard:
     def walk(self, turn=0.0):
         self.runner.send({"cmd": "gait", "on": 1, "freq": 1.5, "turn": turn})
         self.write("action", "walk" + (f" (turn {turn:+.1f})" if turn else ""))
+
+    def turn(self, sign, degrees=45):
+        """Rotate by `degrees`, then carry on straight if walking, or stop if not."""
+        was_walking = self.runner.gait_cmd["on"]
+        freq = self.runner.gait_cmd["freq"]
+        self.runner.send({"cmd": "gait", "on": 1, "freq": freq, "turn": sign})
+        self.write("action", f"turn {'right' if sign > 0 else 'left'} {degrees}°")
+
+        def straighten():
+            if was_walking:
+                self.runner.send({"cmd": "gait", "on": 1, "freq": freq, "turn": 0})
+            else:
+                self.runner.send({"cmd": "gait", "on": 0})
+        self.root.after(int(degrees / TURN_RATE_DEG_S * 1000), straighten)
 
     def stop(self):
         self.runner.send({"cmd": "gait", "on": 0})
@@ -220,7 +234,7 @@ class Dashboard:
             return
         legs_on = len(s["attached"])
         v = speed_from_freq(g["freq"]) * {4: 1.0, 3: 0.6, 2: 0.3}.get(legs_on, 0.0)
-        self.heading += -g["turn"] * 0.8 * dt          # turn > 0 = right = clockwise
+        self.heading += -g["turn"] * math.radians(TURN_RATE_DEG_S) * dt   # turn > 0 = right = clockwise
         self.x += v * math.cos(self.heading) * dt
         self.y += v * math.sin(self.heading) * dt
         lx, ly = self.trail[-1]

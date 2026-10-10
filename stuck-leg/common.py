@@ -6,6 +6,11 @@ Legs are ordered FL, FR, RL, RR everywhere (front-left, front-right, rear-left, 
 
 LEGS = ["FL", "FR", "RL", "RR"]
 
+# How fast the dog turns at full turn (gait "turn" = +-1), in degrees per second.
+# "Turn left 90 degrees" holds a full turn for 90 / TURN_RATE_DEG_S seconds, then
+# goes straight again. Measure it on the real robot (time a 360) and update this.
+TURN_RATE_DEG_S = 45.0
+
 # Class labels. 0 = nothing stuck, 1..4 = that leg is stuck.
 CLASS_NAMES = ["normal"] + [f"stuck_{leg}" for leg in LEGS]
 

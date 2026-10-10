@@ -21,7 +21,7 @@ import time
 import urllib.error
 import urllib.request
 
-from common import LEGS
+from common import LEGS, TURN_RATE_DEG_S
 
 SPEEDS = {"slow": 1.0, "normal": 1.5, "fast": 2.0}   # gait cycles per second
 MAX_WALK_S = 30
@@ -34,8 +34,11 @@ not need to manage that unless asked.
 Rules:
 - Use tools to act. Keep replies to one or two short sentences.
 - For "walk forward N seconds", call walk with seconds=N. For "walk" with no duration, call walk
-  without seconds (it keeps walking until stopped).
-- turn is between -1 and 1: negative turns left, positive turns right, 0 is straight.
+  without seconds (it keeps walking until stopped). walk always goes straight.
+- To change direction, call turn: it rotates by that many degrees and then carries on straight
+  (still walking if it was walking, otherwise it stops). "turn left" / "turn right" with no angle
+  means 90 degrees, "a little" means 30, "turn around" means 180.
+- "Go left for 3 seconds" = turn left 90, then walk 3 seconds. Never make the robot circle.
 - Only call detach_leg if the user explicitly asks to remove, drop or detach a leg.
 - If you are unsure what the robot is doing, call get_status first.
 - If the user asks for something the robot can't do (jump, fetch, talk), say so briefly."""
@@ -44,12 +47,18 @@ LEG_PARAM = {"type": "string", "enum": LEGS, "description": "FL, FR, RL or RR"}
 TOOLS = [
     {"type": "function", "function": {
         "name": "walk",
-        "description": "Start walking. Optionally walk for a number of seconds and then stop.",
+        "description": "Walk straight ahead. Optionally walk for a number of seconds and then stop.",
         "parameters": {"type": "object", "properties": {
             "seconds": {"type": "number", "description": f"how long to walk, up to {MAX_WALK_S}; omit to keep walking"},
             "speed": {"type": "string", "enum": list(SPEEDS), "description": "default normal"},
-            "turn": {"type": "number", "description": "-1 (hard left) to 1 (hard right); 0 = straight"},
         }}}},
+    {"type": "function", "function": {
+        "name": "turn",
+        "description": "Change direction by a number of degrees, then continue straight.",
+        "parameters": {"type": "object", "properties": {
+            "direction": {"type": "string", "enum": ["left", "right"]},
+            "degrees": {"type": "number", "description": "how far to turn, 1-360; default 90"},
+        }, "required": ["direction"]}}},
     {"type": "function", "function": {
         "name": "stop", "description": "Stop walking (motors off).",
         "parameters": {"type": "object", "properties": {}}}},
@@ -179,6 +188,21 @@ class RobotActions:
         if self.runner:
             self.runner.send(cmd)
 
+    def turn(self, direction, degrees=None):
+        """Hold a full turn just long enough to rotate `degrees`, then go straight (or stop)."""
+        degrees = max(1.0, min(360.0, float(degrees or 90)))
+        sign = 1.0 if direction == "right" else -1.0
+        was_walking = bool(self.runner and self.runner.gait_cmd["on"])
+        freq = self.runner.gait_cmd["freq"] if self.runner else SPEEDS["normal"]
+        self._send({"cmd": "gait", "on": 1, "freq": freq, "turn": sign})
+        time.sleep(degrees / TURN_RATE_DEG_S)      # the runner thread keeps the heartbeat going meanwhile
+        if was_walking:
+            self._send({"cmd": "gait", "on": 1, "freq": freq, "turn": 0})
+        else:
+            self._send({"cmd": "gait", "on": 0})
+        return {"ok": True, "turned": f"{degrees:.0f} degrees {direction}",
+                "now": "walking straight" if was_walking else "stopped"}
+
     def status(self):
         if self.runner:
             return self.runner.snapshot()
@@ -189,7 +213,7 @@ class RobotActions:
         if name == "walk":
             speed = args.get("speed", "normal")
             freq = SPEEDS.get(speed, SPEEDS["normal"])
-            turn = max(-1.0, min(1.0, float(args.get("turn", 0) or 0)))
+            turn = 0.0                              # walk goes straight; turning is its own tool
             seconds = args.get("seconds")
             self._send({"cmd": "gait", "on": 1, "freq": freq, "turn": turn})
             if seconds:
@@ -198,6 +222,8 @@ class RobotActions:
                 self._send({"cmd": "gait", "on": 0})
                 return {"ok": True, "walked_seconds": seconds, "status": self.status()}
             return {"ok": True, "walking": True, "speed": speed, "turn": turn}
+        if name == "turn":
+            return self.turn(str(args.get("direction", "left")).lower(), args.get("degrees"))
         if name == "stop":
             self._send({"cmd": "gait", "on": 0})
             return {"ok": True, "walking": False}
