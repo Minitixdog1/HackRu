@@ -73,7 +73,8 @@
 //   motor wire IN1 <- MOTOR_PWM pin, motor wire IN2 <- MOTOR_DIR pin.
 static const int MOTOR_PWM[4] = {4, 6, 0, 3};
 static const int MOTOR_DIR_PIN[4] = {5, 7, 1, 10};
-static const int MOTOR_FLIP[4] = {1, 1, 1, 1};   // set to -1 if that leg spins the wrong way
+// Order: FL, FR, RL, RR. -1 = that motor is wired/mounted backwards, so its direction is inverted in software.
+static const int MOTOR_FLIP[4] = {-1, 1, 1, 1};  // FL inverted
 
 #define MOTOR_PWM_FREQ 20000           // 20 kHz: above hearing, no whine
 #define MOTOR_PWM_BITS 10              // duty 0..1023
