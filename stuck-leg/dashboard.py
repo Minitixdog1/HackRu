@@ -383,10 +383,10 @@ def main():
         try:
             llm = LLMClient(args.llm_url, args.llm_model)
             available = llm.models()
-            note = f"Qwen ready ({args.llm_model} at {llm.url})"
-            if available and args.llm_model not in available:
-                note = (f"Model '{args.llm_model}' isn't on {llm.url}. It has: {', '.join(available)}. "
-                        "Restart with --llm-model NAME")
+            if not available:
+                raise RuntimeError("no models installed (run: ollama pull qwen3:4b)")
+            switched = llm.pick_model(available)       # use whatever Qwen is installed
+            note = f"Qwen ready ({llm.model} at {llm.url})" + (f"; {switched}" if switched else "")
             commander = Commander(llm, RobotActions(runner, log=lambda t: None), log=lambda t: None)
         except Exception as e:
             note = f"Qwen not reachable at {args.llm_url}: {e}. Buttons still work."

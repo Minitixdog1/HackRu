@@ -65,6 +65,17 @@ python dashboard.py --demo --no-enc   # try it with the pretend robot
 The model file remembers whether it was trained with encoders. `live.py` and the dashboard warn you
 if that doesn't match the robot.
 
+## One command (Windows)
+
+```
+start_robot.bat                 # robot on its own "robotdog" Wi-Fi (192.168.4.1)
+start_robot.bat 172.20.10.5     # or the robot's IP from the Serial Monitor
+```
+
+It trains the stuck-leg model if there isn't one, starts Ollama if needed, checks the robot is
+reachable, and opens the dashboard with Qwen connected. It picks whichever Qwen model you have
+installed (`ollama list`), so you don't need `--llm-model`.
+
 ## The dashboard
 
 ```bash

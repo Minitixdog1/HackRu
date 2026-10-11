@@ -123,6 +123,19 @@ class LLMClient:
         except Exception as e:
             raise RuntimeError(f"can't reach the LLM server at {self.url}: {e}") from None
 
+    def pick_model(self, available):
+        """If the requested model isn't installed, switch to an installed Qwen (or any) model.
+        Returns a note for the user, or None if nothing changed."""
+        if not available or self.model in available:
+            return None
+        base = self.model.split(":")[0]
+        same = [m for m in available if m.split(":")[0] == base]
+        qwen = [m for m in available if "qwen" in m.lower()]
+        choice = (same or qwen or available)[0]
+        note = f"'{self.model}' isn't installed, using '{choice}'"
+        self.model = choice
+        return note
+
     def chat(self, messages, tools):
         """Returns (assistant_message_to_keep, text, [(call_id, name, args_dict), ...])."""
         if self.api == "ollama":
@@ -322,9 +335,9 @@ def main():
             "in --llm-url, and on that computer set OLLAMA_HOST=0.0.0.0 and restart Ollama so it accepts\n"
             "connections from other machines (and allow port 11434 through its firewall).")
     print(f"LLM server: {llm.url} ({llm.api} API)")
-    if available and args.llm_model not in available:
-        print(f"!! model '{args.llm_model}' isn't on that server. It has: {', '.join(available)}")
-        print("   pass the right one with --llm-model")
+    switched = llm.pick_model(available)
+    if switched:
+        print(f"!! {switched} (choose another with --llm-model)")
 
     runner = None
     if not args.no_robot:
